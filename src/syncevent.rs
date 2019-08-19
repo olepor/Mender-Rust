@@ -7,7 +7,7 @@ use std::time; // Multiple producer, single consumer channel.
 
 // These are based on the config file parameters found in:
 // /etc/mender/mender.conf
-enum Events {
+pub enum Events {
     InventoryUpdate,
     CheckForUpdate,
 }
@@ -34,11 +34,11 @@ impl Default for IntervalConf {
 
 // TODO -- Maybe add custom deserialization to the IntervalConf, so that
 // it can be embedded as a struct to Evnt(?).
-struct Event {
+pub struct Event {
     inventory_check_interval: time::Duration,
     update_check_interval: time::Duration,
     publisher: mpsc::Sender<Events>,
-    pub events: mpsc::Receiver<Events>,
+    events: mpsc::Receiver<Events>,
 }
 
 impl Event {
@@ -51,6 +51,7 @@ impl Event {
             serde_json::from_reader(reader).expect("Failed to parse the config file");
 
         let (tx1, rx) = mpsc::channel();
+
         Event {
             publisher: tx1,
             events: rx,
@@ -59,7 +60,7 @@ impl Event {
         }
     }
     // Run the event Creator loop
-    pub fn run(&self) {
+    pub fn start(self) -> Self {
         // Start the two asynchronous event loops,
         // and enable them to create events at the given intervals.
         let tx1 = mpsc::Sender::clone(&self.publisher);
@@ -78,5 +79,6 @@ impl Event {
                 tx2.send(Events::InventoryUpdate).unwrap();
             }
         });
+        self
     }
 }

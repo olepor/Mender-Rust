@@ -3,7 +3,7 @@ use std::process::Command;
 mod syncevent; // Bring the syncevent module into scope
 
 trait State {
-    fn mutate(&self) -> Box<dyn State>;
+    fn mutate(&self, context: &Context) -> Box<dyn State>;
 }
 
 enum ExternalState {
@@ -43,7 +43,7 @@ impl Init {
 }
 
 impl State for Init {
-    fn mutate(&self) -> Box<dyn State> {
+    fn mutate(&self, context: &Context) -> Box<dyn State> {
         Box::new(Idle {})
     }
 }
@@ -57,38 +57,55 @@ impl From<Init> for Idle {
 }
 
 impl State for Idle {
-    fn mutate(&self) -> Box<dyn State> {
+    fn mutate(&self, context: &Context) -> Box<dyn State> {
         // Check if the client is authorized
-        Box::new(Init {})
+        // TODO
+        // Read from the event producer, and do either a
+        // CheckUpdate, or a InventoryUpdate state
+        match context.sync_events.recv().unwrap() {
+            syncevent::Events::InventoryUpdate => {
+                Box::new(Sync::new(SyncState::InventoryUpdateState)) // TODO -- How to send the different transitions and sync-sub-states?
+            }
+            syncevent::Events::CheckForUpdate => Box::new(Sync::new(SyncState::CheckUpdateState)),
+            _ => Box::new(Init {}),
+        }
     }
 }
 
-enum SyncStates {
-    CheckWaitState,
+enum SyncState {
     InventoryUpdateState,
     CheckUpdateState,
 }
 
-struct Sync {}
+struct Sync {
+    substate: SyncState,
+}
 
 impl Sync {
-    fn run(&self) {
-        // TODO -- Sync needs an asynchronous event vector, which
-        // creates events (inventoryUpdate, and UpdateUpdates).
-        ()
+    fn new(substate: SyncState) -> Sync {
+        Sync { substate: substate }
     }
 }
 
 impl State for Sync {
-    fn mutate(&self) -> Box<dyn State> {
-        Box::new(Init {})
+    fn mutate(&self, context: &Context) -> Box<dyn State> {
+        match self.substate {
+            SyncState::InventoryUpdateState => Box::new(Idle{}),
+            SyncState::CheckUpdateState => Box::new(Idle{}),
+            _ => Box::new(Init{}),
+        }
     }
+}
+
+struct Context {
+    sync_events: syncevent::Event,
 }
 
 struct StateMachine {
     external_state: ExternalState,
     internal_state: InternalState,
     state: Box<dyn State>,
+    context: Context,
 }
 
 impl StateMachine {
@@ -97,6 +114,19 @@ impl StateMachine {
             external_state: ExternalState::Init,
             internal_state: InternalState::Init,
             state: Box::new(Init::new()),
+            context: Context {
+                sync_events: syncevent::Event::new().start(),
+            },
+        }
+    }
+
+    pub fn run(&self) -> Result<(), &'static str> {
+        let mut cur_state: Box<dyn State> = Box::new(Init::new());
+        // let mut next_state: Box<dyn State>;
+        loop {
+            // Enter Current State Transition
+            cur_state = cur_state.mutate(&self.context);
+            // Leave Current State Transition
         }
     }
 }
@@ -129,18 +159,6 @@ trait Leave<T> {
     }
 }
 
-impl StateMachine {
-    pub fn run(&self) -> Result<(), &'static str> {
-        let mut cur_state: Box<dyn State> = Box::new(Init::new());
-        // let mut next_state: Box<dyn State>;
-        loop {
-            // Enter Current State Transition
-            cur_state = cur_state.mutate();
-            // Leave Current State Transition
-        }
-    }
-}
-
 fn main() {
-    println!("Hello, world!");
+    let _state_machine_res = StateMachine::new().run();
 }
