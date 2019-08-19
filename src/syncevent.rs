@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::sync::mpsc;
+use std::thread;
 use std::time; // Multiple producer, single consumer channel.
                // syncevent creates either an InvetoryUpdateEvent, or an UpdateCheckEvent,
                // and sends them to the other asynchronous process through... Hmm...
@@ -21,7 +22,6 @@ impl InventoryUpdate {
         InventoryUpdate { interval, channel }
     }
     fn produce(&self) -> bool {
-        use std::thread;
         loop {
             thread::sleep(self.interval);
             self.channel
@@ -41,9 +41,7 @@ impl UpdateCheck {
         UpdateCheck { interval, channel }
     }
     fn produce(&self) -> bool {
-        use std::thread;
         loop {
-            thread::sleep(self.interval);
             self.channel
                 .send(Event::CheckForUpdate)
                 .expect("UpdateCheck: Failed to send signal on the channel"); // TODO -- What to send here?
@@ -64,9 +62,11 @@ struct IntervalConf {
 struct Evnt {
     publisher: mpsc::Sender<Event>,
     pub events: mpsc::Receiver<Event>,
+    inventory_check_interval: time::Duration,
+    update_check_interval: time::Duration,
 }
 
-impl Event {
+impl Evnt {
     // Initialize the Evnt struct with an InventoryCheck at once,
     // and then an update check after a minute.
     fn new() -> Box<Evnt> {
@@ -79,23 +79,25 @@ impl Event {
         Box::new(Evnt {
             publisher: tx1,
             events: rx,
+            inventory_check_interval: time::Duration::from_secs(conf.inventory_check_interval),
+            update_check_interval: time::Duration::from_secs(conf.update_check_interval),
         })
     }
     // Run the event Creator loop
     fn run(&self) {
-        // let (tx1, rx) = mpsc::channel();
-        // // Start the two asynchronous event loops,
-        // // and enable them to create events at the given intervals.
-        // let tx2 = mpsc::Sender::clone(&tx);
-        // thread::spawn(move || {
-        //     let uc = UpdateCheck::new(time.Duration::from_secs(600), tx1);
-        //     uc.run();
-        // }
-        // );
-        // thread::spawn(move || {
-        //     let iu = InventoryUpdate::new(time::Duration::from_secs(1200), tx2);
-        //     io.run();
-        // })
-
+        // Start the two asynchronous event loops,
+        // and enable them to create events at the given intervals.
+        let tx1 = mpsc::Sender::clone(&self.publisher);
+        let update_interval = self.update_check_interval;
+        thread::spawn(move || {
+            let uc = UpdateCheck::new(update_interval, tx1);
+            uc.produce();
+        });
+        let tx2 = mpsc::Sender::clone(&self.publisher);
+        let inventory_interval = self.inventory_check_interval;
+        thread::spawn(move || {
+            let iu = InventoryUpdate::new(inventory_interval, tx2);
+            iu.produce();
+        });
     }
 }
