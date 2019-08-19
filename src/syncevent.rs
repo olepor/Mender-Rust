@@ -81,4 +81,9 @@ impl Event {
         });
         self
     }
+    // Reads from the receiving end of the event channel,
+    // and returns the next scheduled event. If noone are ready, it blocks.
+    pub fn next(&self) -> Events {
+        self.events.recv().unwrap()
+    }
 }

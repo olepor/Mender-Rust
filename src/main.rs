@@ -62,7 +62,7 @@ impl State for Idle {
         // TODO
         // Read from the event producer, and do either a
         // CheckUpdate, or a InventoryUpdate state
-        match context.sync_events.recv().unwrap() {
+        match context.sync_events.next() {
             syncevent::Events::InventoryUpdate => {
                 Box::new(Sync::new(SyncState::InventoryUpdateState)) // TODO -- How to send the different transitions and sync-sub-states?
             }
