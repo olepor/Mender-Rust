@@ -53,23 +53,35 @@ use std::fs::File;
 use std::io::BufReader;
 
 #[derive(serde::Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
+#[serde(default)] /* Return the default values on missing value */
 struct IntervalConf {
+    #[serde(rename = "UpdatePollIntervalSeconds")]
     update_check_interval: u64,
+    #[serde(rename = "InventoryPollIntervalSeconds")]
     inventory_check_interval: u64,
 }
+impl Default for IntervalConf {
+    fn default() -> Self {
+        IntervalConf {
+            update_check_interval: 600,
+            inventory_check_interval: 1200,
+        }
+    }
+}
 
+// TODO -- Maybe add custom deserialization to the IntervalConf, so that
+// it can be embedded as a struct to Evnt(?).
 struct Evnt {
-    publisher: mpsc::Sender<Event>,
-    pub events: mpsc::Receiver<Event>,
     inventory_check_interval: time::Duration,
     update_check_interval: time::Duration,
+    publisher: mpsc::Sender<Event>,
+    pub events: mpsc::Receiver<Event>,
 }
 
 impl Evnt {
     // Initialize the Evnt struct with an InventoryCheck at once,
     // and then an update check after a minute.
-    fn new() -> Box<Evnt> {
+    pub fn new() -> Box<Evnt> {
         let file = File::open("./dummies/mender.conf").expect("Error opening file");
         let reader = BufReader::new(file);
         let conf: IntervalConf =
@@ -84,7 +96,7 @@ impl Evnt {
         })
     }
     // Run the event Creator loop
-    fn run(&self) {
+    pub fn run(&self) {
         // Start the two asynchronous event loops,
         // and enable them to create events at the given intervals.
         let tx1 = mpsc::Sender::clone(&self.publisher);
