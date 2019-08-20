@@ -1,3 +1,6 @@
 Cargo.lock
 /target
 **/*.rs.bk
+src/GPATH
+src/GRTAGS
+src/GTAGS
