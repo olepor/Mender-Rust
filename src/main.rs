@@ -1,9 +1,20 @@
 use std::process::Command;
+use std::time;
 
 mod syncevent; // Bring the syncevent module into scope
 
 trait State {
-    fn mutate(&self, context: &Context) -> Box<dyn State>;
+    fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State>;
+}
+
+struct Client {
+    is_authorized: bool,
+}
+
+impl Client {
+    fn is_authorized(&self) -> bool {
+        return self.is_authorized;
+    }
 }
 
 enum ExternalState {
@@ -42,9 +53,24 @@ impl Init {
     // }
 }
 
+enum InitState {
+    Authorize,
+    AuthorizeWait,
+}
+
 impl State for Init {
-    fn mutate(&self, context: &Context) -> Box<dyn State> {
-        Box::new(Idle {})
+    fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State> {
+        if client.is_authorized() {
+            Box::new(Idle {})
+        } else {
+            match context.auth_events.next() {
+                authorizationevent::Event::AuthorizeAttempt => {
+                    // Try to authorize, if unsuccesful, wait for the next published authorization event.
+                    Box::new(Init {})
+                }
+            }
+            // Box::new(Init {})
+        }
     }
 }
 
@@ -57,17 +83,12 @@ impl From<Init> for Idle {
 }
 
 impl State for Idle {
-    fn mutate(&self, context: &Context) -> Box<dyn State> {
-        // Check if the client is authorized
-        // TODO
-        // Read from the event producer, and do either a
-        // CheckUpdate, or a InventoryUpdate state
+    fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State> {
         match context.sync_events.next() {
             syncevent::Events::InventoryUpdate => {
                 Box::new(Sync::new(SyncState::InventoryUpdateState)) // TODO -- How to send the different transitions and sync-sub-states?
             }
             syncevent::Events::CheckForUpdate => Box::new(Sync::new(SyncState::CheckUpdateState)),
-            _ => Box::new(Init {}),
         }
     }
 }
@@ -88,17 +109,18 @@ impl Sync {
 }
 
 impl State for Sync {
-    fn mutate(&self, context: &Context) -> Box<dyn State> {
+    fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State> {
         match self.substate {
-            SyncState::InventoryUpdateState => Box::new(Idle{}),
-            SyncState::CheckUpdateState => Box::new(Idle{}),
-            _ => Box::new(Init{}),
+            SyncState::InventoryUpdateState => Box::new(Idle {}),
+            SyncState::CheckUpdateState => Box::new(Idle {}),
+            _ => Box::new(Init {}),
         }
     }
 }
 
 struct Context {
     sync_events: syncevent::Event,
+    auth_events: authorizationevent::AuthorizationEvent,
 }
 
 struct StateMachine {
@@ -108,6 +130,52 @@ struct StateMachine {
     context: Context,
 }
 
+// TODO -- how to send different objects through the same interface?
+// trait Event {
+//     fn new() -> Self;
+//     fn start(&self) -> Self;
+// }
+
+// authorizationevent module produces authorization events at a given interval for
+// the state machine to consume.
+mod authorizationevent {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time;
+    pub enum Event {
+        AuthorizeAttempt,
+    }
+    pub struct AuthorizationEvent {
+        interval: time::Duration,
+        publisher: mpsc::Sender<Event>,
+        events: mpsc::Receiver<Event>,
+    }
+    impl AuthorizationEvent {
+        pub fn new() -> AuthorizationEvent {
+            let (tx1, rx) = mpsc::channel();
+            AuthorizationEvent {
+                interval: time::Duration::from_secs(30),
+                publisher: tx1,
+                events: rx,
+            }
+        }
+        pub fn start(self) -> Self {
+            let interval = self.interval.clone();
+            let tx1 = mpsc::Sender::clone(&self.publisher);
+            thread::spawn(move || loop {
+                thread::sleep(interval);
+                tx1.send(Event::AuthorizeAttempt).unwrap();
+            });
+            self
+        }
+        // Reads from the receiving end of the event channel,
+        // and returns the next scheduled event. If noone are ready, it blocks.
+        pub fn next(&self) -> Event {
+            self.events.recv().unwrap()
+        }
+    }
+}
+
 impl StateMachine {
     fn new() -> StateMachine {
         StateMachine {
@@ -115,7 +183,8 @@ impl StateMachine {
             internal_state: InternalState::Init,
             state: Box::new(Init::new()),
             context: Context {
-                sync_events: syncevent::Event::new().start(),
+                sync_events: syncevent::Event::new(), // Do not start until the client is authorized!
+                auth_events: authorizationevent::AuthorizationEvent::new().start(),
             },
         }
     }
@@ -125,7 +194,12 @@ impl StateMachine {
         // let mut next_state: Box<dyn State>;
         loop {
             // Enter Current State Transition
-            cur_state = cur_state.mutate(&self.context);
+            cur_state = cur_state.mutate(
+                &self.context,
+                &Client {
+                    is_authorized: false,
+                },
+            );
             // Leave Current State Transition
         }
     }
