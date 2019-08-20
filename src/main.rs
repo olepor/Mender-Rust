@@ -12,6 +12,17 @@ struct Client {
 }
 
 impl Client {
+    fn authorize(&self) -> bool {
+        if !self.is_authorized {
+            // Do authorization
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl Client {
     fn is_authorized(&self) -> bool {
         return self.is_authorized;
     }
