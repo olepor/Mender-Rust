@@ -72,6 +72,7 @@ enum InitState {
 impl State for Init {
     fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State> {
         if client.is_authorized() {
+            context.sync_events.start();
             Box::new(Idle {})
         } else {
             match context.auth_events.next() {
@@ -170,14 +171,13 @@ mod authorizationevent {
                 events: rx,
             }
         }
-        pub fn start(self) -> Self {
+        pub fn start(&self) {
             let interval = self.interval.clone();
             let tx1 = mpsc::Sender::clone(&self.publisher);
             thread::spawn(move || loop {
                 thread::sleep(interval);
                 tx1.send(Event::AuthorizeAttempt).unwrap();
             });
-            self
         }
         // Reads from the receiving end of the event channel,
         // and returns the next scheduled event. If noone are ready, it blocks.
@@ -195,7 +195,7 @@ impl StateMachine {
             state: Box::new(Init::new()),
             context: Context {
                 sync_events: syncevent::Event::new(), // Do not start until the client is authorized!
-                auth_events: authorizationevent::AuthorizationEvent::new().start(),
+                auth_events: authorizationevent::AuthorizationEvent::new(),
             },
         }
     }
@@ -203,14 +203,13 @@ impl StateMachine {
     pub fn run(&self) -> Result<(), &'static str> {
         let mut cur_state: Box<dyn State> = Box::new(Init::new());
         // let mut next_state: Box<dyn State>;
+        let client = &Client {
+            is_authorized: false,
+        };
+        self.context.auth_events.start(); // Since the client is not authorized, start the authorization event publisher.
         loop {
             // Enter Current State Transition
-            cur_state = cur_state.mutate(
-                &self.context,
-                &Client {
-                    is_authorized: false,
-                },
-            );
+            cur_state = cur_state.mutate(&self.context, client);
             // Leave Current State Transition
         }
     }

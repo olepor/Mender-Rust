@@ -60,7 +60,7 @@ impl Event {
         }
     }
     // Run the event Creator loop
-    pub fn start(self) -> Self {
+    pub fn start(&self) {
         // Start the two asynchronous event loops,
         // and enable them to create events at the given intervals.
         let tx1 = mpsc::Sender::clone(&self.publisher);
@@ -79,7 +79,6 @@ impl Event {
                 tx2.send(Events::InventoryUpdate).unwrap();
             }
         });
-        self
     }
     // Reads from the receiving end of the event channel,
     // and returns the next scheduled event. If noone are ready, it blocks.
