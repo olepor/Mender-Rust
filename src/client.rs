@@ -15,7 +15,7 @@ impl IDData {
             data: HashMap::new(),
         }
     }
-    fn fill(& mut self) {
+    fn fill(&mut self) {
         // TODO -- Only dummy data for now!
         self.data
             .insert("MAC".to_string(), "123::345::678".to_string());
@@ -24,7 +24,8 @@ impl IDData {
     }
 }
 
-// TODO -- This needs to be serialized to bytes
+// TODO -- This needs to be serialized to bytes (Through serde(?))
+#[derive(Serialize)]
 struct AuthRequestBody {
     id_data: IDData,
     pubkey: String,
@@ -92,29 +93,28 @@ impl Client {
             let basepath = "/api/devices/v1/authentication";
             let request = "/authentication/auth_requests";
             let uri = protocol.to_owned() + host + basepath + request;
-            // hreq.Header.Add("Content-Type", "application/json")
-            //     hreq.Header.Add("Authorization", fmt.Sprintf("Bearer %s", req.Token))
-            //     hreq.Header.Add("X-MEN-Signature", base64.StdEncoding.EncodeToString(req.Signature))
             // Create the AuthRequest body
-            let n = self.private_key.n().clone().to_owned().unwrap();
-            let e = self.private_key.e().clone().to_owned().unwrap();
-            let pub_key = Rsa::from_public_components(n, e).unwrap();
-            let auth_req = AuthRequestBody{
+            let pem_pub_key =
+                String::from_utf8(self.private_key.public_key_to_pem_pkcs1().unwrap()).unwrap();
+            let auth_req = AuthRequestBody {
                 id_data: IDData::new(),
-                pubkey: String::from("pub-key -- TODO"), //pub_key.to_string(),
+                pubkey: pem_pub_key,
                 tenant_token: None, // TODO -- This needs to be handled
             };
-            let mut request: Request<&str> = Request::builder()
+            let auth_request_bytes = bincode::serialize(&auth_req)
+                .expect("Failed to binary serialize the authorization request body");
+            // the `auth_req` body should be in byte form
+            let mut request: Request<&[u8]> = Request::builder()
                 .method("POST")
                 .uri(uri)
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer ".to_owned() + "TODO -- Token")
                 .header("X-MEN-Signature", "TODO -- req_signature")
-                .body("AuthRequest -- TODO")
+                .body(auth_request_bytes.as_slice())
                 .unwrap();
             // First do a shasum256 of the request
             use openssl::hash::{hash, MessageDigest};
-            let sha256_sum = hash(MessageDigest::sha256(), request.body().as_bytes()).unwrap();
+            let sha256_sum = hash(MessageDigest::sha256(), request.body()).unwrap();
             true
         } else {
             false
