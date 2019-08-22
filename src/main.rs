@@ -68,8 +68,9 @@ impl State for Init {
             match auth_events.next() {
                 authorizationevent::Event::AuthorizeAttempt => {
                     // Try to authorize, if unsuccesful, wait for the next published authorization event.
-                    // TODO -- Stop the authorization events....
-                    // context.auth_events.stop();
+                    use std::thread;
+                    thread::sleep(time::Duration::from_secs(60));
+                    client.authorize();
                 }
             }
             Box::new(Init {})

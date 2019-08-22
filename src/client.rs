@@ -1,5 +1,35 @@
-use openssl::rsa::{Padding, Rsa};
 use http::{Request, Response};
+use openssl::rsa::{Padding, Rsa};
+use std::collections::HashMap;
+
+use serde::Serialize;
+
+#[derive(Serialize)]
+struct IDData {
+    data: HashMap<String, String>,
+}
+
+impl IDData {
+    fn new() -> IDData {
+        IDData {
+            data: HashMap::new(),
+        }
+    }
+    fn fill(& mut self) {
+        // TODO -- Only dummy data for now!
+        self.data
+            .insert("MAC".to_string(), "123::345::678".to_string());
+        self.data
+            .insert("serial_number".to_string(), "12345678".to_string());
+    }
+}
+
+// TODO -- This needs to be serialized to bytes
+struct AuthRequestBody {
+    id_data: IDData,
+    pubkey: String,
+    tenant_token: Option<String>,
+}
 
 pub struct Client {
     is_authorized: bool,
@@ -51,7 +81,6 @@ impl Client {
     pub fn authorize(&self) -> bool {
         if !self.is_authorized {
             // Do authorization
-            // TODO -- What is the server address?
             // Authorization API can be found at:
             // https://docs.mender.io/2.0/apis/device-apis/device-authentication
             // HOST: docker.mender.io
@@ -63,17 +92,29 @@ impl Client {
             let basepath = "/api/devices/v1/authentication";
             let request = "/authentication/auth_requests";
             let uri = protocol.to_owned() + host + basepath + request;
-
             // hreq.Header.Add("Content-Type", "application/json")
             //     hreq.Header.Add("Authorization", fmt.Sprintf("Bearer %s", req.Token))
             //     hreq.Header.Add("X-MEN-Signature", base64.StdEncoding.EncodeToString(req.Signature))
-            let request = Request::builder()
+            // Create the AuthRequest body
+            let n = self.private_key.n().clone().to_owned().unwrap();
+            let e = self.private_key.e().clone().to_owned().unwrap();
+            let pub_key = Rsa::from_public_components(n, e).unwrap();
+            let auth_req = AuthRequestBody{
+                id_data: IDData::new(),
+                pubkey: String::from("pub-key -- TODO"), //pub_key.to_string(),
+                tenant_token: None, // TODO -- This needs to be handled
+            };
+            let mut request: Request<&str> = Request::builder()
+                .method("POST")
                 .uri(uri)
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer ".to_owned() + "TODO -- Token")
                 .header("X-MEN-Signature", "TODO -- req_signature")
-                .body(())
+                .body("AuthRequest -- TODO")
                 .unwrap();
+            // First do a shasum256 of the request
+            use openssl::hash::{hash, MessageDigest};
+            let sha256_sum = hash(MessageDigest::sha256(), request.body().as_bytes()).unwrap();
             true
         } else {
             false
