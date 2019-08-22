@@ -1,32 +1,20 @@
 use std::process::Command;
 use std::time;
 
+// use rsa::{PublicKey, RSAPrivateKey, PaddingScheme};
+// use rand::rngs::OsRng;
+
 mod syncevent; // Bring the syncevent module into scope
+mod client; // Bring the client into scope
+use client::Client;
 
 trait State {
     fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State>;
 }
 
-struct Client {
-    is_authorized: bool,
-}
+// struct AuthorizationManager {
 
-impl Client {
-    fn authorize(&self) -> bool {
-        if !self.is_authorized {
-            // Do authorization
-            true
-        } else {
-            false
-        }
-    }
-}
-
-impl Client {
-    fn is_authorized(&self) -> bool {
-        return self.is_authorized;
-    }
-}
+// }
 
 enum ExternalState {
     Init,
@@ -71,17 +59,20 @@ enum InitState {
 
 impl State for Init {
     fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State> {
+        let auth_events = authorizationevent::AuthorizationEvent::new();
+        auth_events.start();
         if client.is_authorized() {
             context.sync_events.start();
             Box::new(Idle {})
         } else {
-            match context.auth_events.next() {
+            match auth_events.next() {
                 authorizationevent::Event::AuthorizeAttempt => {
                     // Try to authorize, if unsuccesful, wait for the next published authorization event.
-                    Box::new(Init {})
+                    // TODO -- Stop the authorization events....
+                    // context.auth_events.stop();
                 }
             }
-            // Box::new(Init {})
+            Box::new(Init {})
         }
     }
 }
@@ -132,7 +123,6 @@ impl State for Sync {
 
 struct Context {
     sync_events: syncevent::Event,
-    auth_events: authorizationevent::AuthorizationEvent,
 }
 
 struct StateMachine {
@@ -195,7 +185,6 @@ impl StateMachine {
             state: Box::new(Init::new()),
             context: Context {
                 sync_events: syncevent::Event::new(), // Do not start until the client is authorized!
-                auth_events: authorizationevent::AuthorizationEvent::new(),
             },
         }
     }
@@ -203,15 +192,15 @@ impl StateMachine {
     pub fn run(&self) -> Result<(), &'static str> {
         let mut cur_state: Box<dyn State> = Box::new(Init::new());
         // let mut next_state: Box<dyn State>;
-        let client = &Client {
-            is_authorized: false,
-        };
-        self.context.auth_events.start(); // Since the client is not authorized, start the authorization event publisher.
+        let client = Client::new();
         loop {
             // Enter Current State Transition
-            cur_state = cur_state.mutate(&self.context, client);
+            cur_state = cur_state.mutate(&self.context, &client);
             // Leave Current State Transition
         }
+        // TODO -- Maybe this should be a master implementation, so that
+        // the statemachine switches on the state, and handles the overarching ownership
+        // of all the context variables (?)
     }
 }
 
