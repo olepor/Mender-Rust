@@ -72,11 +72,6 @@ impl Client {
     }
     fn generate_private_key() -> Rsa<openssl::pkey::Private> {
         Rsa::generate(2048).unwrap()
-        // TODO -- Write the key to file!
-        // self.public_key = Rsa::from(rsa);
-        // let data = b"foobar";
-        // let mut buf = vec![0; rsa.size() as usize];
-        // let encrypted_len = rsa.public_encrypt(data, &mut buf, Padding::PKCS1).unwrap();
     }
 
     pub fn authorize(&self) -> bool {
@@ -113,6 +108,8 @@ impl Client {
             self.private_key
                 .private_encrypt(&request_sha256_sum, &mut sig, Padding::PKCS1)
                 .expect("Failed to sign the request body");
+            // Base64 encode the signature
+            let sig_base64 = base64::encode(&sig);
             let mut request: Request<&[u8]> = Request::builder()
                 .method("POST")
                 .uri(uri)
@@ -120,7 +117,7 @@ impl Client {
                 .header("Authorization", "Bearer ".to_owned() + "TODO -- Token")
                 .header(
                     "X-MEN-Signature",
-                    std::str::from_utf8(sig.as_slice()).unwrap(),
+                    sig_base64,
                 )
                 .body(auth_req_str.as_bytes())
                 .unwrap();
