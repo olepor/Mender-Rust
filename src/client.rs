@@ -101,20 +101,29 @@ impl Client {
                 pubkey: pem_pub_key,
                 tenant_token: None, // TODO -- This needs to be handled
             };
-            let auth_request_bytes = bincode::serialize(&auth_req)
-                .expect("Failed to binary serialize the authorization request body");
-            // the `auth_req` body should be in byte form
+            // serialize the request to json
+            let auth_req_str = serde_json::to_string(&auth_req)
+                .expect("Failed to serialize the authorization request to json");
+            // First do a shasum256 of the request
+            use openssl::hash::{hash, MessageDigest};
+            let request_sha256_sum =
+                hash(MessageDigest::sha256(), auth_req_str.as_bytes()).unwrap();
+            // Sign the authorization request with the private(?) key
+            let mut sig = Vec::new();
+            self.private_key
+                .private_encrypt(&request_sha256_sum, &mut sig, Padding::PKCS1)
+                .expect("Failed to sign the request body");
             let mut request: Request<&[u8]> = Request::builder()
                 .method("POST")
                 .uri(uri)
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer ".to_owned() + "TODO -- Token")
-                .header("X-MEN-Signature", "TODO -- req_signature")
-                .body(auth_request_bytes.as_slice())
+                .header(
+                    "X-MEN-Signature",
+                    std::str::from_utf8(sig.as_slice()).unwrap(),
+                )
+                .body(auth_req_str.as_bytes())
                 .unwrap();
-            // First do a shasum256 of the request
-            use openssl::hash::{hash, MessageDigest};
-            let sha256_sum = hash(MessageDigest::sha256(), request.body()).unwrap();
             true
         } else {
             false
