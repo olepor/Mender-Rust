@@ -1,15 +1,23 @@
 use std::process::Command;
 use std::time;
+use log::{info, trace, warn, debug};
 
 // use rsa::{PublicKey, RSAPrivateKey, PaddingScheme};
 // use rand::rngs::OsRng;
 
-mod syncevent; // Bring the syncevent module into scope
-mod client; // Bring the client into scope
+mod client;
+mod syncevent; // Bring the syncevent module into scope // Bring the client into scope
 use client::Client;
 
 trait State {
     fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State>;
+    fn name<'a>(&'a self) -> &'a str;
+}
+
+impl std::fmt::Display for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({})", self.name())
+    }
 }
 
 // struct AuthorizationManager {
@@ -58,6 +66,9 @@ enum InitState {
 }
 
 impl State for Init {
+    fn name<'a>(&'a self) -> &'a str {
+        "Init"
+    }
     fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State> {
         let auth_events = authorizationevent::AuthorizationEvent::new();
         auth_events.start();
@@ -87,6 +98,9 @@ impl From<Init> for Idle {
 }
 
 impl State for Idle {
+    fn name<'a>(&'a self) -> &'a str {
+        "Idle"
+    }
     fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State> {
         match context.sync_events.next() {
             syncevent::Events::InventoryUpdate => {
@@ -113,6 +127,9 @@ impl Sync {
 }
 
 impl State for Sync {
+    fn name<'a>(&'a self) -> &'a str {
+        "Sync"
+    }
     fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State> {
         match self.substate {
             SyncState::InventoryUpdateState => Box::new(Idle {}),
@@ -167,7 +184,10 @@ mod authorizationevent {
             let tx1 = mpsc::Sender::clone(&self.publisher);
             thread::spawn(move || loop {
                 thread::sleep(interval);
-                tx1.send(Event::AuthorizeAttempt).unwrap();
+                match tx1.send(Event::AuthorizeAttempt) {
+                    Ok(_) => println!("Successfully sent Authorization attemp Event"),
+                    Err(e) => println!("Failed to send the authorization attempt Event: {}", e),
+                }
             });
         }
         // Reads from the receiving end of the event channel,
@@ -194,8 +214,10 @@ impl StateMachine {
         let mut cur_state: Box<dyn State> = Box::new(Init::new());
         // let mut next_state: Box<dyn State>;
         let client = Client::new();
+        debug!("Running the state machine");
         loop {
             // Enter Current State Transition
+            println!("StateMachine: cur_state: {}", cur_state.name());
             cur_state = cur_state.mutate(&self.context, &client);
             // Leave Current State Transition
         }
@@ -234,5 +256,7 @@ trait Leave<T> {
 }
 
 fn main() {
+    simple_logger::init_with_level(log::Level::Debug).unwrap();
+    debug!("Starting Mender...");
     let _state_machine_res = StateMachine::new().run();
 }

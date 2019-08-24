@@ -80,8 +80,8 @@ impl Client {
             // Authorization API can be found at:
             // https://docs.mender.io/2.0/apis/device-apis/device-authentication
             let protocol = "https://";
-            let host = "docker.mender.io";
-            let basepath = "/api/devices/v1/authentication";
+            let host = "docker.mender.io"; // TODO -- For testing purposes
+            let basepath = "/api/devices/v1";
             let request = "/authentication/auth_requests";
             let uri = protocol.to_owned() + host + basepath + request;
             // Create the AuthRequest body
@@ -112,12 +112,15 @@ impl Client {
             let res = request_client
                 .post(&uri)
                 .header("Content-Type", "application/json")
-                // .header("Authorization", "Bearer ".to_owned() + "TODO -- Token") Not supported yet
+                // .header("Authorization", "Bearer ".to_owned() + "TODO -- Token") Not supported yet (Can also use reqwest bearer_auth method)
                 .header("X-MEN-Signature", sig_base64)
                 .body(auth_req_str)
-                .send()
-                .expect("Failed to POST the authorization request");
-            println!("Response from authorization request: {:?}", res);
+                .send();
+            match res {
+               Ok(resp) => println!("Authorized with {:?}", resp),
+               Err(r) => println!("Failed to authorize with the server: {:?}", r),
+            }
+            println!("uri: {}", uri);
             true
         } else {
             false
