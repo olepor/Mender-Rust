@@ -1,6 +1,6 @@
+use log::{debug, info, trace, warn};
 use std::process::Command;
 use std::time;
-use log::{info, trace, warn, debug};
 
 // use rsa::{PublicKey, RSAPrivateKey, PaddingScheme};
 // use rand::rngs::OsRng;
@@ -37,6 +37,31 @@ enum ExternalState {
     ArtifactFailure,
 }
 
+enum Event {
+    AuthorizeAttempt,
+    CheckForUpdate,
+    SendInventory,
+    None,
+}
+
+// impl ExternalState {
+//     fn run(&self, event: Event) {
+//         // loop {}
+//         match (self, event) {
+//             (Init, Event::AuthorizeAttempt) => {}
+//             (Idle, Event::None) => {}
+//             (Sync, Event::None) => {}
+//             (Download, Event::None) => {}
+//             (ArtifactInstall, Event::None) => {}
+//             (ArtifactReboot, Event::None) => {}
+//             (ArtifactCommit, Event::None) => {}
+//             (ArtifactRollback, Event::None) => {}
+//             (ArtifactRollbackReboot, Event::None) => {}
+//             (ArtifactFailure, Event::None) => {}
+//         }
+//     }
+// }
+
 enum InternalState {
     Init,
     ArtifactInstall,
@@ -72,20 +97,39 @@ impl State for Init {
     fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State> {
         let auth_events = authorizationevent::AuthorizationEvent::new();
         auth_events.start();
-        if client.is_authorized() {
-            context.sync_events.start();
-            Box::new(Idle {})
-        } else {
-            match auth_events.next() {
-                authorizationevent::Event::AuthorizeAttempt => {
-                    // Try to authorize, if unsuccesful, wait for the next published authorization event.
-                    use std::thread;
-                    thread::sleep(time::Duration::from_secs(60));
-                    client.authorize();
+        loop {
+            debug!("Looping in Init State");
+            if client.is_authorized() {
+                context.sync_events.start();
+            } else {
+                debug!("Waiting for authorization event");
+                match &auth_events.next() {
+                    authorizationevent::Event::AuthorizeAttempt => {
+                        debug!("Received authorization event in Init");
+                        // Try to authorize, if unsuccesful, wait for the next published authorization event.
+                        use reqwest::StatusCode;
+                        match client.authorize() {
+                            Ok(resp) => {
+                                match resp.status() {
+                                    StatusCode::OK => {
+                                        info!("Client successfully authorized with the Mender server");
+                                        break;
+                                    }
+                                    _ => {
+                                        info!("Failed to authorize the client: {:?}", resp);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                debug!("Authorization request error: {:?}", e);
+                            }
+                        }
+                        debug!("Client did not authorize... Retrying");
+                    }
                 }
             }
-            Box::new(Init {})
         }
+        Box::new(Idle {})
     }
 }
 
@@ -134,7 +178,7 @@ impl State for Sync {
         match self.substate {
             SyncState::InventoryUpdateState => Box::new(Idle {}),
             SyncState::CheckUpdateState => Box::new(Idle {}),
-            _ => Box::new(Init {}),
+            _ => Box::new(Idle {}),
         }
     }
 }
@@ -215,43 +259,17 @@ impl StateMachine {
         // let mut next_state: Box<dyn State>;
         let client = Client::new();
         debug!("Running the state machine");
-        loop {
-            // Enter Current State Transition
-            println!("StateMachine: cur_state: {}", cur_state.name());
-            cur_state = cur_state.mutate(&self.context, &client);
-            // Leave Current State Transition
-        }
-        // TODO -- Maybe this should be a master implementation, so that
-        // the statemachine switches on the state, and handles the overarching ownership
-        // of all the context variables (?)
-    }
-}
-
-trait Enter<T> {
-    fn error_state(&self) -> Box<dyn State>;
-    fn next_state(&self) -> Box<dyn State>;
-    // A Transition either runs successfully (ie, no error in the state scripts),
-    // or fails, on which an error state is returned.
-    fn enter(&self) -> Box<dyn State> {
-        // run enter script
-        // fn enter() -> next_state_handle
-        if Command::new("Artifact_Enter").output().is_err() {
-            self.error_state()
-        } else {
-            self.next_state()
-        }
-    }
-}
-trait Leave<T> {
-    fn error_state(&self) -> Box<dyn State>;
-    fn next_state(&self) -> Box<dyn State>;
-
-    fn leave(&self) -> Box<dyn State> {
-        if Command::new("Artifact_Leave").output().is_err() {
-            self.error_state()
-        } else {
-            self.next_state()
-        }
+        let next_state: Box<dyn State>;
+        // loop {
+        //     // Enter Current State Transition
+        //     println!("StateMachine: cur_state: {}", cur_state.name());
+        //     next_state = cur_state.mutate(&self.context, &client);
+        //     cur_state = next_state;
+        //     // Leave Current State Transition
+        // }
+        // First the client needs to authorize with the server
+        cur_state.mutate(&self.context, &client);
+        Ok(())
     }
 }
 
