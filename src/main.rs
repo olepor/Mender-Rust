@@ -109,17 +109,19 @@ impl State for Init {
                         // Try to authorize, if unsuccesful, wait for the next published authorization event.
                         use reqwest::StatusCode;
                         match client.authorize() {
-                            Ok(resp) => {
-                                match resp.status() {
-                                    StatusCode::OK => {
-                                        info!("Client successfully authorized with the Mender server");
-                                        break;
-                                    }
-                                    _ => {
-                                        info!("Failed to authorize the client: {:?}", resp);
-                                    }
+                            Ok(mut resp) => match resp.status() {
+                                StatusCode::OK => {
+                                    info!("Client successfully authorized with the Mender server");
+                                    let jwt =
+                                        resp.text().expect("Failed to extract the respone text");
+                                    info!("JWT token: {}", jwt);
+                                    client.jwt_token = jwt;
+                                    break;
                                 }
-                            }
+                                _ => {
+                                    info!("Failed to authorize the client: {:?}", resp);
+                                }
+                            },
                             Err(e) => {
                                 debug!("Authorization request error: {:?}", e);
                             }

@@ -40,6 +40,7 @@ pub struct Client {
     private_key: Rsa<openssl::pkey::Private>,
     // public_key: Rsa<openssl::pkey::Public>,
     tenant_token: Option<String>,
+    pub jwt_token: Option<String>,
     // Request signature, computed as
     // 'BASE64(SIGN(device_private_key, SHA256(request_body)))'.
     // Verified with the public key presented by the device.
