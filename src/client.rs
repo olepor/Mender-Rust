@@ -35,7 +35,7 @@ struct AuthRequestBody {
 }
 
 pub struct Client {
-    is_authorized: bool,
+    pub is_authorized: bool,
     address: String,
     private_key: Rsa<openssl::pkey::Private>,
     // public_key: Rsa<openssl::pkey::Public>,
@@ -63,6 +63,7 @@ impl Client {
                 address: String::from("https://docker.mender.io"),
                 private_key: rsa,
                 tenant_token: None,
+                jwt_token: None,
             }
         } else {
             debug!("Generating rsa private key of length 3072 bits");
@@ -72,6 +73,7 @@ impl Client {
                 address: String::from("https://docker.mender.io"),
                 private_key: rsa,
                 tenant_token: None,
+                jwt_token: None,
             }
         }
     }

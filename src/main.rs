@@ -10,7 +10,7 @@ mod syncevent; // Bring the syncevent module into scope // Bring the client into
 use client::Client;
 
 trait State {
-    fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State>;
+    // fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State>;
     fn name<'a>(&'a self) -> &'a str;
 }
 
@@ -38,10 +38,11 @@ enum ExternalState {
 }
 
 enum Event {
+    None,
+    Uninitialized,
     AuthorizeAttempt,
     CheckForUpdate,
     SendInventory,
-    None,
 }
 
 // impl ExternalState {
@@ -64,6 +65,8 @@ enum Event {
 
 enum InternalState {
     Init,
+    Authorize,
+    AuthorizeWait,
     ArtifactInstall,
     ArtifactReboot,
 }
@@ -74,15 +77,30 @@ impl Init {
     fn new() -> Init {
         Init {}
     }
-    // Runs the sub-state machine for the external init states.
-    // fn run(&self) {
-    //     let event = Event::Type; // Is a function which handles the state (whichever, and returns the next state to be run)
-    //     match (*self, event) {
-    //         (CheckWaitState, Init) => Init{},
-    //         (Init, CheckWaitState) => CheckWaitState{},
-    //         // etc, etc
-    //     }
-    // }
+
+    fn run(client: &mut Client) -> ExternalState {
+        // Try to authorize, if unsuccesful, wait for the next published authorization event.
+        use reqwest::StatusCode;
+        match client.authorize() {
+            Ok(mut resp) => match resp.status() {
+                StatusCode::OK => {
+                    info!("Client successfully authorized with the Mender server");
+                    let jwt = resp.text().expect("Failed to extract the respone text");
+                    info!("JWT token: {}", jwt);
+                    client.jwt_token = Some(jwt);
+                    ExternalState::Idle
+                }
+                _ => {
+                    info!("Failed to authorize the client: {:?}", resp);
+                    ExternalState::Init
+                }
+            },
+            Err(e) => {
+                debug!("Authorization request error: {:?}", e);
+                ExternalState::Init
+            }
+        }
+    }
 }
 
 enum InitState {
@@ -93,45 +111,6 @@ enum InitState {
 impl State for Init {
     fn name<'a>(&'a self) -> &'a str {
         "Init"
-    }
-    fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State> {
-        let auth_events = authorizationevent::AuthorizationEvent::new();
-        auth_events.start();
-        loop {
-            debug!("Looping in Init State");
-            if client.is_authorized() {
-                context.sync_events.start();
-            } else {
-                debug!("Waiting for authorization event");
-                match &auth_events.next() {
-                    authorizationevent::Event::AuthorizeAttempt => {
-                        debug!("Received authorization event in Init");
-                        // Try to authorize, if unsuccesful, wait for the next published authorization event.
-                        use reqwest::StatusCode;
-                        match client.authorize() {
-                            Ok(mut resp) => match resp.status() {
-                                StatusCode::OK => {
-                                    info!("Client successfully authorized with the Mender server");
-                                    let jwt =
-                                        resp.text().expect("Failed to extract the respone text");
-                                    info!("JWT token: {}", jwt);
-                                    client.jwt_token = jwt;
-                                    break;
-                                }
-                                _ => {
-                                    info!("Failed to authorize the client: {:?}", resp);
-                                }
-                            },
-                            Err(e) => {
-                                debug!("Authorization request error: {:?}", e);
-                            }
-                        }
-                        debug!("Client did not authorize... Retrying");
-                    }
-                }
-            }
-        }
-        Box::new(Idle {})
     }
 }
 
@@ -147,14 +126,14 @@ impl State for Idle {
     fn name<'a>(&'a self) -> &'a str {
         "Idle"
     }
-    fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State> {
-        match context.sync_events.next() {
-            syncevent::Events::InventoryUpdate => {
-                Box::new(Sync::new(SyncState::InventoryUpdateState)) // TODO -- How to send the different transitions and sync-sub-states?
-            }
-            syncevent::Events::CheckForUpdate => Box::new(Sync::new(SyncState::CheckUpdateState)),
-        }
-    }
+    // fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State> {
+    //     match context.sync_events.next() {
+    //         syncevent::Events::InventoryUpdate => {
+    //             Box::new(Sync::new(SyncState::InventoryUpdateState)) // TODO -- How to send the different transitions and sync-sub-states?
+    //         }
+    //         syncevent::Events::CheckForUpdate => Box::new(Sync::new(SyncState::CheckUpdateState)),
+    //     }
+    // }
 }
 
 enum SyncState {
@@ -176,13 +155,13 @@ impl State for Sync {
     fn name<'a>(&'a self) -> &'a str {
         "Sync"
     }
-    fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State> {
-        match self.substate {
-            SyncState::InventoryUpdateState => Box::new(Idle {}),
-            SyncState::CheckUpdateState => Box::new(Idle {}),
-            _ => Box::new(Idle {}),
-        }
-    }
+    // fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State> {
+    //     match self.substate {
+    //         SyncState::InventoryUpdateState => Box::new(Idle {}),
+    //         SyncState::CheckUpdateState => Box::new(Idle {}),
+    //         _ => Box::new(Idle {}),
+    //     }
+    // }
 }
 
 struct Context {
@@ -196,21 +175,13 @@ struct StateMachine {
     context: Context,
 }
 
-// TODO -- how to send different objects through the same interface?
-// trait Event {
-//     fn new() -> Self;
-//     fn start(&self) -> Self;
-// }
-
 // authorizationevent module produces authorization events at a given interval for
 // the state machine to consume.
 mod authorizationevent {
+    use super::Event;
     use std::sync::mpsc;
     use std::thread;
     use std::time;
-    pub enum Event {
-        AuthorizeAttempt,
-    }
     pub struct AuthorizationEvent {
         interval: time::Duration,
         publisher: mpsc::Sender<Event>,
@@ -236,12 +207,44 @@ mod authorizationevent {
                 }
             });
         }
+    }
+
+    use super::EventProducer;
+    impl EventProducer for AuthorizationEvent {
         // Reads from the receiving end of the event channel,
         // and returns the next scheduled event. If noone are ready, it blocks.
-        pub fn next(&self) -> Event {
+        fn next(&self) -> Event {
             self.events.recv().unwrap()
         }
     }
+}
+
+struct EventP {
+    event: Option<Box<dyn EventProducer>>,
+}
+
+impl EventP {
+    fn new() -> EventP {
+        EventP { event: None }
+    }
+    fn next(&self) -> Event {
+        match &self.event {
+            Some(ep) => {ep.next()},
+            None => Event::None,
+        }
+    }
+
+    fn producer(&mut self, producer: Box<dyn EventProducer>) {
+        self.event = Some(producer);
+    }
+
+    fn standard_producer(&mut self) {
+        self.event = None;
+    }
+}
+
+trait EventProducer {
+    fn next(&self) -> Event;
 }
 
 impl StateMachine {
@@ -257,21 +260,42 @@ impl StateMachine {
     }
 
     pub fn run(&self) -> Result<(), &'static str> {
-        let mut cur_state: Box<dyn State> = Box::new(Init::new());
-        // let mut next_state: Box<dyn State>;
-        let client = Client::new();
+        let mut cur_state: ExternalState = ExternalState::Init;
+        let mut client = Client::new();
+        let mut event: EventP = EventP::new();
         debug!("Running the state machine");
-        let next_state: Box<dyn State>;
-        // loop {
-        //     // Enter Current State Transition
-        //     println!("StateMachine: cur_state: {}", cur_state.name());
-        //     next_state = cur_state.mutate(&self.context, &client);
-        //     cur_state = next_state;
-        //     // Leave Current State Transition
-        // }
+        loop {
+            cur_state = match (cur_state, event.next()) {
+                (ExternalState::Init, Event::None) => {
+                    debug!("Starting the authorization event producer");
+                    let auth_events = authorizationevent::AuthorizationEvent::new();
+                    auth_events.start();
+                    event.producer(Box::new(auth_events));
+                    ExternalState::Init
+                }
+                (ExternalState::Init, Event::AuthorizeAttempt) if !client.is_authorized => {
+                    debug!("Client is not authorized. Trying to authorize...");
+                    match Init::run(&mut client) {
+                        ExternalState::Sync => {
+                            event.standard_producer();
+                            ExternalState::Sync
+                        }
+                        _ => ExternalState::Init,
+                    }
+                }
+                (ExternalState::Init, Event::AuthorizeAttempt) if client.is_authorized => {
+                    debug!("Client is authorized. Set the standard producer");
+                    event.standard_producer();
+                    ExternalState::Idle
+                }
+                (ExternalState::Idle, Event::CheckForUpdate) => ExternalState::Sync,
+                (ExternalState::Idle, Event::SendInventory) => ExternalState::Sync,
+                (_, _) => panic!("Unrecognized state transition"),
+            }
+        }
         // First the client needs to authorize with the server
-        cur_state.mutate(&self.context, &client);
-        Ok(())
+        // cur_state.mutate(&self.context, &client);
+        // Ok(())
     }
 }
 
