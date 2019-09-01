@@ -161,7 +161,7 @@ impl Sync {
     fn new(substate: SyncState) -> Sync {
         Sync { substate: substate }
     }
-    fn handle(client: &mut Client) -> ExternalState {
+    fn handle(client: &mut Client) -> (ExternalState, Event) {
         // Try to authorize, if unsuccesful, wait for the next published authorization event.
         use reqwest::StatusCode;
         match client.authorize() {
@@ -172,16 +172,16 @@ impl Sync {
                     info!("JWT token: {}", jwt);
                     client.jwt_token = Some(jwt);
                     client.is_authorized = true;
-                    ExternalState::Idle
+                    (ExternalState::Idle, Event::None)
                 }
                 _ => {
                     info!("Failed to authorize the client: {:?}", resp);
-                    ExternalState::Init
+                    (ExternalState::Idle, Event::None)
                 }
             },
             Err(e) => {
                 debug!("Authorization request error: {:?}", e);
-                ExternalState::Init
+                (ExternalState::Idle, Event::None)
             }
         }
     }
@@ -293,25 +293,8 @@ impl StateMachine {
                     Idle::wait_for_event(&auth_events) // TODO -- Replace with update and inventory events
                 }
                 (ExternalState::Sync, Event::AuthorizeAttempt) => {
-                    match client.authorize() {
-                        Ok(r) => {
-                            match r.status() {
-                                reqwest::StatusCode::OK => {
-                                    info!("Successfully authorized with the Mender Server");
-                                    client.is_authorized = true;
-                                }
-                                s => info!(
-                                    "Failed to authorize with the Mender server: Response code: {}",
-                                    s
-                                ),
-                            };
-                            client.is_authorized = true;
-                        }
-                        Err(e) => {
-                            info!("Failed to Authorize with the Mender Server: Error: {}", e);
-                        }
-                    }
-                    (ExternalState::Idle, Event::None)
+                    debug!("Sync: Handle");
+                    Sync::handle(&mut client)
                 }
                 // (ExternalState::Sync, Event::CheckForUpdate) => ExternalState::Sync,
                 // (ExternalState::Sync, Event::SendInventory) => ExternalState::Sync,
