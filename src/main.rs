@@ -24,6 +24,7 @@ impl std::fmt::Display for State {
 
 // }
 
+#[derive(Clone, Copy, Debug)]
 enum ExternalState {
     Init,
     Idle,
@@ -37,6 +38,7 @@ enum ExternalState {
     ArtifactFailure,
 }
 
+#[derive(Clone, Copy, Debug)]
 enum Event {
     None,
     Uninitialized,
@@ -88,6 +90,7 @@ impl Init {
                     let jwt = resp.text().expect("Failed to extract the respone text");
                     info!("JWT token: {}", jwt);
                     client.jwt_token = Some(jwt);
+                    client.is_authorized = true;
                     ExternalState::Idle
                 }
                 _ => {
@@ -122,6 +125,15 @@ impl From<Init> for Idle {
     }
 }
 
+impl Idle {
+    fn wait_for_event(event_producer: &dyn EventProducer) -> (ExternalState, Event) {
+        match event_producer.next() {
+            Event::AuthorizeAttempt => (ExternalState::Sync, Event::AuthorizeAttempt),
+            _ => (ExternalState::Idle, Event::None), // Infinite loop
+        }
+    }
+}
+
 impl State for Idle {
     fn name<'a>(&'a self) -> &'a str {
         "Idle"
@@ -148,6 +160,30 @@ struct Sync {
 impl Sync {
     fn new(substate: SyncState) -> Sync {
         Sync { substate: substate }
+    }
+    fn handle(client: &mut Client) -> ExternalState {
+        // Try to authorize, if unsuccesful, wait for the next published authorization event.
+        use reqwest::StatusCode;
+        match client.authorize() {
+            Ok(mut resp) => match resp.status() {
+                StatusCode::OK => {
+                    info!("Client successfully authorized with the Mender server");
+                    let jwt = resp.text().expect("Failed to extract the respone text");
+                    info!("JWT token: {}", jwt);
+                    client.jwt_token = Some(jwt);
+                    client.is_authorized = true;
+                    ExternalState::Idle
+                }
+                _ => {
+                    info!("Failed to authorize the client: {:?}", resp);
+                    ExternalState::Init
+                }
+            },
+            Err(e) => {
+                debug!("Authorization request error: {:?}", e);
+                ExternalState::Init
+            }
+        }
     }
 }
 
@@ -219,30 +255,6 @@ mod authorizationevent {
     }
 }
 
-struct EventP {
-    event: Option<Box<dyn EventProducer>>,
-}
-
-impl EventP {
-    fn new() -> EventP {
-        EventP { event: None }
-    }
-    fn next(&self) -> Event {
-        match &self.event {
-            Some(ep) => {ep.next()},
-            None => Event::None,
-        }
-    }
-
-    fn producer(&mut self, producer: Box<dyn EventProducer>) {
-        self.event = Some(producer);
-    }
-
-    fn standard_producer(&mut self) {
-        self.event = None;
-    }
-}
-
 trait EventProducer {
     fn next(&self) -> Event;
 }
@@ -261,37 +273,53 @@ impl StateMachine {
 
     pub fn run(&self) -> Result<(), &'static str> {
         let mut cur_state: ExternalState = ExternalState::Init;
+        let mut cur_action: Event = Event::Uninitialized;
+        let auth_events = authorizationevent::AuthorizationEvent::new();
+        auth_events.start();
         let mut client = Client::new();
-        let mut event: EventP = EventP::new();
         debug!("Running the state machine");
         loop {
-            cur_state = match (cur_state, event.next()) {
-                (ExternalState::Init, Event::None) => {
+            let (state, action) = match (cur_state, cur_action) {
+                (ExternalState::Init, Event::Uninitialized) => {
                     debug!("Starting the authorization event producer");
-                    let auth_events = authorizationevent::AuthorizationEvent::new();
-                    auth_events.start();
-                    event.producer(Box::new(auth_events));
-                    ExternalState::Init
+                    (ExternalState::Idle, Event::None)
                 }
-                (ExternalState::Init, Event::AuthorizeAttempt) if !client.is_authorized => {
-                    debug!("Client is not authorized. Trying to authorize...");
-                    match Init::run(&mut client) {
-                        ExternalState::Sync => {
-                            event.standard_producer();
-                            ExternalState::Sync
+                (ExternalState::Idle, _) if !client.is_authorized => {
+                    debug!("Client is not authorized, waiting for authorization event");
+                    Idle::wait_for_event(&auth_events)
+                }
+                (ExternalState::Idle, _) if client.is_authorized => {
+                    debug!("Client is authorized, waiting for authorization event");
+                    Idle::wait_for_event(&auth_events) // TODO -- Replace with update and inventory events
+                }
+                (ExternalState::Sync, Event::AuthorizeAttempt) => {
+                    match client.authorize() {
+                        Ok(r) => {
+                            match r.status() {
+                                reqwest::StatusCode::OK => {
+                                    info!("Successfully authorized with the Mender Server");
+                                    client.is_authorized = true;
+                                }
+                                s => info!(
+                                    "Failed to authorize with the Mender server: Response code: {}",
+                                    s
+                                ),
+                            };
+                            client.is_authorized = true;
                         }
-                        _ => ExternalState::Init,
+                        Err(e) => {
+                            info!("Failed to Authorize with the Mender Server: Error: {}", e);
+                        }
                     }
+                    (ExternalState::Idle, Event::None)
                 }
-                (ExternalState::Init, Event::AuthorizeAttempt) if client.is_authorized => {
-                    debug!("Client is authorized. Set the standard producer");
-                    event.standard_producer();
-                    ExternalState::Idle
-                }
-                (ExternalState::Idle, Event::CheckForUpdate) => ExternalState::Sync,
-                (ExternalState::Idle, Event::SendInventory) => ExternalState::Sync,
+                // (ExternalState::Sync, Event::CheckForUpdate) => ExternalState::Sync,
+                // (ExternalState::Sync, Event::SendInventory) => ExternalState::Sync,
                 (_, _) => panic!("Unrecognized state transition"),
-            }
+            };
+            debug!("cur_state: {:?}, cur_event: {:?}", state, action);
+            cur_state = state;
+            cur_action = action;
         }
         // First the client needs to authorize with the server
         // cur_state.mutate(&self.context, &client);
