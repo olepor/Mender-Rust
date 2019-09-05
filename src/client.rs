@@ -141,6 +141,15 @@ impl Client {
         let hash = hasher.finish();
         hash
     }
+
+    fn check_for_update(&self) -> Result<reqwest::Response, reqwest::Error> {
+
+        let request_client = reqwest::Client::new();
+        request_client
+            .get("https://localhost/")
+            .query(&[("device_type", "qemux86-64"), ("artifact_name", "foobar")])
+            .send()
+    }
 }
 
 impl Client {

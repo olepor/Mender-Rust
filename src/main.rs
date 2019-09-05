@@ -185,6 +185,10 @@ impl Sync {
             }
         }
     }
+
+    fn check_for_update(client: &mut Client) -> (ExternalState, Event) {
+        (ExternalState::Download, Event::None)
+    }
 }
 
 impl State for Sync {
@@ -293,10 +297,13 @@ impl StateMachine {
                     Idle::wait_for_event(&auth_events) // TODO -- Replace with update and inventory events
                 }
                 (ExternalState::Sync, Event::AuthorizeAttempt) => {
-                    debug!("Sync: Handle");
+                    debug!("Sync: Authorization attempt");
                     Sync::handle(&mut client)
                 }
-                // (ExternalState::Sync, Event::CheckForUpdate) => ExternalState::Sync,
+                (ExternalState::Sync, Event::CheckForUpdate) => {
+                    debug!("Sync: Check for update");
+                    Sync::handle(&mut client)
+                },
                 // (ExternalState::Sync, Event::SendInventory) => ExternalState::Sync,
                 (_, _) => panic!("Unrecognized state transition"),
             };
