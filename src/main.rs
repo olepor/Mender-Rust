@@ -1,6 +1,7 @@
 use log::{debug, info, trace, warn};
 use std::process::Command;
 use std::time;
+use reqwest::StatusCode;
 
 // use rsa::{PublicKey, RSAPrivateKey, PaddingScheme};
 // use rand::rngs::OsRng;
@@ -163,7 +164,6 @@ impl Sync {
     }
     fn handle(client: &mut Client) -> (ExternalState, Event) {
         // Try to authorize, if unsuccesful, wait for the next published authorization event.
-        use reqwest::StatusCode;
         match client.authorize() {
             Ok(mut resp) => match resp.status() {
                 StatusCode::OK => {
@@ -187,7 +187,47 @@ impl Sync {
     }
 
     fn check_for_update(client: &mut Client) -> (ExternalState, Event) {
+        match client.check_for_update() {
+            Ok(resp) => {
+                debug!("Sync: UpdateCheck: Received response");
+                match resp.status() {
+                    StatusCode::OK => {
+                        debug!("Yay, new update");
+                    }
+                    StatusCode::NO_CONTENT => {
+                        debug!("No new update available");
+                    }
+                    _ => {
+                        info!("Sync: UpdateCheck: Error checking for update");
+                    }
+                }
+            }
+            Err(e) => {
+                info!("Sync: UpdateCheck: Error: {:?}", e);
+                return (ExternalState::Idle, Event::None);
+            }
+        }
         (ExternalState::Download, Event::None)
+    }
+
+    fn send_inventory(client: &mut Client) -> (ExternalState, Event) {
+        match client.send_inventory() {
+            Ok(resp) => {
+                debug!("Inventory response!");
+                match resp.status() {
+                    StatusCode::OK => {
+                        debug!("Inventory sent");
+                    }
+                    _ => {
+                        debug!("Received non OK status code");
+                    }
+                }
+            }
+            _ => {
+                debug!("Failed to send inventory");
+            }
+        }
+        return (ExternalState::Idle, Event::None);
     }
 }
 
@@ -302,9 +342,12 @@ impl StateMachine {
                 }
                 (ExternalState::Sync, Event::CheckForUpdate) => {
                     debug!("Sync: Check for update");
-                    Sync::handle(&mut client)
-                },
-                // (ExternalState::Sync, Event::SendInventory) => ExternalState::Sync,
+                    Sync::check_for_update(&mut client)
+                }
+                (ExternalState::Sync, Event::SendInventory) => {
+                    debug!("Sync: Sending inventory");
+                    Sync::send_inventory(&mut client)
+                }
                 (_, _) => panic!("Unrecognized state transition"),
             };
             debug!("cur_state: {:?}, cur_event: {:?}", state, action);

@@ -111,7 +111,6 @@ impl Client {
         request_client
             .post(&uri)
             .header("Content-Type", "application/json")
-            // .header("Authorization", "Bearer ".to_owned() + "TODO -- Token") Not supported yet (Can also use reqwest bearer_auth method)
             .header("X-MEN-Signature", sig_base64)
             .body(auth_req_str)
             // .body(auth_req_str.as_bytes())
@@ -142,11 +141,32 @@ impl Client {
         hash
     }
 
-    fn check_for_update(&self) -> Result<reqwest::Response, reqwest::Error> {
-
+    // Host : docker.mender.io
+    // BasePath : /api/devices/v1/inventory
+    // Schemes : HTTPS
+    // Paths
+    // PATCH /device/attributes
+    pub fn send_inventory(&self) -> Result<reqwest::Response, reqwest::Error> {
         let request_client = reqwest::Client::new();
         request_client
-            .get("https://localhost/")
+            .patch("https://localhost/api/devices/v1/inventory/devices/attributes")
+            .bearer_auth(self.jwt_token.as_ref().unwrap())
+            .json(&[InventoryAttribute {
+                name: "Mac".to_string(),
+                value: "123:456:789:123".to_string(),
+            }])
+            .send()
+    }
+
+    // Host : docker.mender.io
+    // BasePath : /api/devices/v1/deployments
+    // Schemes : HTTPS
+    // GET /device/deployments/next
+    pub fn check_for_update(&self) -> Result<reqwest::Response, reqwest::Error> {
+        let request_client = reqwest::Client::new();
+        request_client
+            .get("https://localhost/api/devices/v1/deployments/device/deployments/next")
+            .bearer_auth(self.jwt_token.as_ref().unwrap())
             .query(&[("device_type", "qemux86-64"), ("artifact_name", "foobar")])
             .send()
     }
@@ -156,6 +176,14 @@ impl Client {
     pub fn is_authorized(&self) -> bool {
         return self.is_authorized;
     }
+}
+
+#[derive(Serialize)]
+struct InventoryAttribute {
+    #[serde(rename(deserialize = "name"))]
+    name: String,
+    #[serde(rename(deserialize = "value"))]
+    value: String,
 }
 
 #[cfg(test)]
