@@ -45,13 +45,14 @@ enum ExternalState {
     ArtifactFailure,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum Event {
     None,
     Uninitialized,
     AuthorizeAttempt,
     CheckForUpdate,
     SendInventory,
+    DownloadUpdate(client::UpdateInfo),
 }
 
 // impl ExternalState {
@@ -201,9 +202,10 @@ impl Sync {
                 match resp.status() {
                     StatusCode::OK => {
                         debug!("Yay, new update!");
-                        debug!("{:?}", resp);
-                        debug!("{:?}", resp.text());
-                        return (ExternalState::Download, Event::None);
+                        let update_info: client::UpdateInfo = resp.json().unwrap();
+                        debug!("{:#?}", update_info);
+                        debug!("Successfully deserialized the update response");
+                        return (ExternalState::Download, Event::DownloadUpdate(update_info));
                     }
                     StatusCode::NO_CONTENT => {
                         debug!("No new update available :(");
@@ -255,6 +257,14 @@ impl State for Sync {
     //         _ => Box::new(Idle {}),
     //     }
     // }
+}
+
+struct Download {}
+
+impl Download {
+    fn update(&self, update_info: client::UpdateInfo) -> (ExternalState, Event) {
+        (ExternalState::Idle, Event::None)
+    }
 }
 
 struct Context {
@@ -318,6 +328,10 @@ impl StateMachine {
                 (ExternalState::Sync, Event::SendInventory) => {
                     debug!("Sync: Sending inventory");
                     Sync::send_inventory(&mut client)
+                }
+                (ExternalState::Download, Event::DownloadUpdate(update_info)) => {
+                    debug!("Download: Downloading the new update d-_-b");
+                    (ExternalState::Idle, Event::None)
                 }
                 (_, _) => panic!("Unrecognized state transition"),
             };

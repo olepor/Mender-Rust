@@ -1,6 +1,7 @@
 use openssl::rsa::{Padding, Rsa};
 // use reqwest::Client;
 use std::collections::HashMap;
+use std::io::BufWriter;
 
 use log::{debug, info, trace, warn};
 
@@ -36,26 +37,27 @@ struct AuthRequestBody {
 }
 
 
-#[derive(Deserialize)]
-struct Source {
+#[derive(Deserialize, Debug, Clone)]
+pub struct Source {
     uri: String,
     expire: String,
 }
 
 // Artifact struct holds the information received from a
 // GET /deployments/next HTTP response
-#[derive(Deserialize)]
-struct Artifact {
+// TODO -- What fields are optional here?
+#[derive(Deserialize, Debug, Clone)]
+pub struct Artifact {
     artifact_name: String,
     source: Source,
     device_types_compatible: Vec<String>,
-    payload_types: Vec<String>,
+    payload_types: Option<Vec<String>>,
 }
 
 // UpdateInfo holds the information received from a GET /deployments/next
 // HTTP response
-#[derive(Deserialize)]
-struct UpdateInfo {
+#[derive(Deserialize, Debug, Clone)]
+pub struct UpdateInfo {
     id: String,
     artifact: Artifact,
 }
@@ -208,6 +210,19 @@ impl Client {
             .query(&[("device_type", "qemux86-64"), ("artifact_name", "foobar")])
             .send()
     }
+
+    pub fn download_update(&self, update_info: UpdateInfo) {
+        debug!("Client: Downloading the update...");
+        let request_client = reqwest::Client::new();
+        let mut resp = request_client
+            .get(&update_info.artifact.source.uri)
+            .send().expect("Failed to GET the update");
+        // TODO -- Later this should be streamed directly to the artifact.
+        let f = std::fs::File::open("foo.txt").expect("Failed to open the file");
+        let mut writer = BufWriter::new(f);
+        resp.copy_to(&mut writer);
+        // TODO -- merge this with the mender-artifact library!
+    }
 }
 
 impl Client {
@@ -273,5 +288,13 @@ mod tests {
         let res = client.sign_request("foobar".as_bytes());
         assert_eq!(res[..384], expected_res[..384]);
         // openssl::rsa::Rsa::dec
+    }
+
+    #[test]
+    fn test_parse_update_response() {
+        let resp_str = r#"{"id":"f4a7b80c-1dd7-415f-a020-834a8c9ce875","artifact":{"artifact_name":"mender-demo-artifact-2.0.0","source":{"uri":"https://s3.docker.mender.io:9000/mender-artifact-storage/5bdd442a-fd0c-4df2-8c0a-317af5eb99fa?X-Amz-Algorithm=AWS4-HMAC-SHA256u0026X-Amz-Content-Sha256=UNSIGNED-PAYLOADu0026X-Amz-Credential=minio%2F20190908%2Fus-east-1%2Fs3%2Faws4_requestu0026X-Amz-Date=20190908T160442Zu0026X-Amz-Expires=86400u0026X-Amz-SignedHeaders=hostu0026response-content-type=application%2Fvnd.mender-artifactu0026X-Amz-Signature=e8898a461ba7dd4e7be85600f00bd36ef17e9102867c82860ba00844e39ee99e","expire":"2019-09-08T16:04:42.6058009Z"},"device_types_compatible":["beaglebone","beaglebone-yocto","beaglebone-yocto-grub","generic-armv6","generic-x86_64","qemux86-64","raspberrypi0w","raspberrypi0-wifi","raspberrypi3"]}}"#;
+
+        let parsed_resp: UpdateInfo = serde_json::from_str(resp_str).expect("Failed to parse update info...");
+
     }
 }
