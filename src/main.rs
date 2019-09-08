@@ -8,7 +8,13 @@ use reqwest::StatusCode;
 
 mod client;
 mod syncevent; // Bring the syncevent module into scope // Bring the client into scope
+mod authevent;
 use client::Client;
+
+
+pub trait EventProducer {
+    fn next(&self) -> Event;
+}
 
 trait State {
     // fn mutate(&self, context: &Context, client: &Client) -> Box<dyn State>;
@@ -40,7 +46,7 @@ enum ExternalState {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum Event {
+pub enum Event {
     None,
     Uninitialized,
     AuthorizeAttempt,
@@ -130,6 +136,8 @@ impl Idle {
     fn wait_for_event(event_producer: &dyn EventProducer) -> (ExternalState, Event) {
         match event_producer.next() {
             Event::AuthorizeAttempt => (ExternalState::Sync, Event::AuthorizeAttempt),
+            Event::SendInventory => (ExternalState::Sync, Event::SendInventory),
+            Event::CheckForUpdate => (ExternalState::Sync, Event::CheckForUpdate),
             _ => (ExternalState::Idle, Event::None), // Infinite loop
         }
     }
@@ -188,17 +196,22 @@ impl Sync {
 
     fn check_for_update(client: &mut Client) -> (ExternalState, Event) {
         match client.check_for_update() {
-            Ok(resp) => {
+            Ok(mut resp) => {
                 debug!("Sync: UpdateCheck: Received response");
                 match resp.status() {
                     StatusCode::OK => {
-                        debug!("Yay, new update");
+                        debug!("Yay, new update!");
+                        debug!("{:?}", resp);
+                        debug!("{:?}", resp.text());
+                        return (ExternalState::Download, Event::None);
                     }
                     StatusCode::NO_CONTENT => {
-                        debug!("No new update available");
+                        debug!("No new update available :(");
+                        return (ExternalState::Idle, Event::None);
                     }
                     _ => {
                         info!("Sync: UpdateCheck: Error checking for update");
+                        return (ExternalState::Idle, Event::None);
                     }
                 }
             }
@@ -207,7 +220,7 @@ impl Sync {
                 return (ExternalState::Idle, Event::None);
             }
         }
-        (ExternalState::Download, Event::None)
+        (ExternalState::Idle, Event::None)
     }
 
     fn send_inventory(client: &mut Client) -> (ExternalState, Event) {
@@ -245,7 +258,7 @@ impl State for Sync {
 }
 
 struct Context {
-    sync_events: syncevent::Event,
+    // sync_events: syncevent::Event,
 }
 
 struct StateMachine {
@@ -255,54 +268,6 @@ struct StateMachine {
     context: Context,
 }
 
-// authorizationevent module produces authorization events at a given interval for
-// the state machine to consume.
-mod authorizationevent {
-    use super::Event;
-    use std::sync::mpsc;
-    use std::thread;
-    use std::time;
-    pub struct AuthorizationEvent {
-        interval: time::Duration,
-        publisher: mpsc::Sender<Event>,
-        events: mpsc::Receiver<Event>,
-    }
-    impl AuthorizationEvent {
-        pub fn new() -> AuthorizationEvent {
-            let (tx1, rx) = mpsc::channel();
-            AuthorizationEvent {
-                interval: time::Duration::from_secs(30),
-                publisher: tx1,
-                events: rx,
-            }
-        }
-        pub fn start(&self) {
-            let interval = self.interval.clone();
-            let tx1 = mpsc::Sender::clone(&self.publisher);
-            thread::spawn(move || loop {
-                thread::sleep(interval);
-                match tx1.send(Event::AuthorizeAttempt) {
-                    Ok(_) => println!("Successfully sent Authorization attemp Event"),
-                    Err(e) => println!("Failed to send the authorization attempt Event: {}", e),
-                }
-            });
-        }
-    }
-
-    use super::EventProducer;
-    impl EventProducer for AuthorizationEvent {
-        // Reads from the receiving end of the event channel,
-        // and returns the next scheduled event. If noone are ready, it blocks.
-        fn next(&self) -> Event {
-            self.events.recv().unwrap()
-        }
-    }
-}
-
-trait EventProducer {
-    fn next(&self) -> Event;
-}
-
 impl StateMachine {
     fn new() -> StateMachine {
         StateMachine {
@@ -310,7 +275,7 @@ impl StateMachine {
             internal_state: InternalState::Init,
             state: Box::new(Init::new()),
             context: Context {
-                sync_events: syncevent::Event::new(), // Do not start until the client is authorized!
+                // sync_events: syncevent::Event::new(), // Do not start until the client is authorized!
             },
         }
     }
@@ -318,7 +283,8 @@ impl StateMachine {
     pub fn run(&self) -> Result<(), &'static str> {
         let mut cur_state: ExternalState = ExternalState::Init;
         let mut cur_action: Event = Event::Uninitialized;
-        let auth_events = authorizationevent::AuthorizationEvent::new();
+        let auth_events = authevent::AuthorizationEvent::new();
+        let update_events = syncevent::SyncEvent::new();
         auth_events.start();
         let mut client = Client::new();
         debug!("Running the state machine");
@@ -333,12 +299,17 @@ impl StateMachine {
                     Idle::wait_for_event(&auth_events)
                 }
                 (ExternalState::Idle, _) if client.is_authorized => {
-                    debug!("Client is authorized, waiting for authorization event");
-                    Idle::wait_for_event(&auth_events) // TODO -- Replace with update and inventory events
+                    debug!("Client is authorized, waiting for update event");
+                    Idle::wait_for_event(&update_events)
                 }
                 (ExternalState::Sync, Event::AuthorizeAttempt) => {
                     debug!("Sync: Authorization attempt");
-                    Sync::handle(&mut client)
+                    let (s,a) = Sync::handle(&mut client);
+                    if client.is_authorized {
+                        debug!("Sync: client successfully authorized. Starting the update event producer");
+                        update_events.start();
+                    }
+                    (s,a)
                 }
                 (ExternalState::Sync, Event::CheckForUpdate) => {
                     debug!("Sync: Check for update");

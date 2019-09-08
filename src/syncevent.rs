@@ -1,8 +1,9 @@
 use serde::Deserialize;
 use std::sync::mpsc;
 use std::thread;
+use log::{debug, info, trace, warn};
 use std::time; // Multiple producer, single consumer channel.
-               // syncevent creates either an InvetoryUpdateEvent, or an UpdateCheckEvent,
+               // syncevent creates either an InventoryUpdateEvent, or an UpdateCheckEvent,
                // and sends them to the other asynchronous process through... Hmm...
 
 // These are based on the config file parameters found in:
@@ -34,17 +35,19 @@ impl Default for IntervalConf {
 
 // TODO -- Maybe add custom deserialization to the IntervalConf, so that
 // it can be embedded as a struct to Evnt(?).
-pub struct Event {
+pub struct SyncEvent {
     inventory_check_interval: time::Duration,
     update_check_interval: time::Duration,
-    publisher: mpsc::Sender<Events>,
-    events: mpsc::Receiver<Events>,
+    publisher: mpsc::Sender<Event>,
+    events: mpsc::Receiver<Event>,
 }
 
-impl Event {
+use super::Event;
+
+impl SyncEvent {
     // Initialize the Evnt struct with an InventoryCheck at once,
     // and then an update check after a minute.
-    pub fn new() -> Event {
+    pub fn new() -> SyncEvent {
         let file = File::open("./dummies/mender.conf").expect("Error opening file");
         let reader = BufReader::new(file);
         let conf: IntervalConf =
@@ -52,7 +55,7 @@ impl Event {
 
         let (tx1, rx) = mpsc::channel();
 
-        Event {
+        SyncEvent {
             publisher: tx1,
             events: rx,
             inventory_check_interval: time::Duration::from_secs(conf.inventory_check_interval),
@@ -68,21 +71,28 @@ impl Event {
         thread::spawn(move || {
             loop {
                 thread::sleep(update_interval);
-                tx1.send(Events::CheckForUpdate).unwrap();
+                debug!("syncevent: Sent CheckForUpdate event!");
+                tx1.send(Event::CheckForUpdate).unwrap();
             }
         });
         let tx2 = mpsc::Sender::clone(&self.publisher);
         let inventory_interval = self.inventory_check_interval;
         thread::spawn(move || {
+            tx2.send(Event::SendInventory).unwrap(); // Send an inventory update straight away
             loop {
                 thread::sleep(inventory_interval);
-                tx2.send(Events::InventoryUpdate).unwrap();
+                debug!("syncevent: Sent SendInventory event!");
+                tx2.send(Event::SendInventory).unwrap();
             }
         });
     }
+}
+
+use super::EventProducer;
+impl EventProducer for SyncEvent {
     // Reads from the receiving end of the event channel,
     // and returns the next scheduled event. If noone are ready, it blocks.
-    pub fn next(&self) -> Events {
+    fn next(&self) -> Event {
         self.events.recv().unwrap()
     }
 }

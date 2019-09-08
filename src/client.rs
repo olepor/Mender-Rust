@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use log::{debug, info, trace, warn};
 
 use serde::Serialize;
+use serde::Deserialize;
 
 #[derive(Serialize)]
 struct IDData {
@@ -32,6 +33,31 @@ struct AuthRequestBody {
     id_data: String,
     pubkey: String,
     tenant_token: Option<String>,
+}
+
+
+#[derive(Deserialize)]
+struct Source {
+    uri: String,
+    expire: String,
+}
+
+// Artifact struct holds the information received from a
+// GET /deployments/next HTTP response
+#[derive(Deserialize)]
+struct Artifact {
+    artifact_name: String,
+    source: Source,
+    device_types_compatible: Vec<String>,
+    payload_types: Vec<String>,
+}
+
+// UpdateInfo holds the information received from a GET /deployments/next
+// HTTP response
+#[derive(Deserialize)]
+struct UpdateInfo {
+    id: String,
+    artifact: Artifact,
 }
 
 pub struct Client {
@@ -147,14 +173,25 @@ impl Client {
     // Paths
     // PATCH /device/attributes
     pub fn send_inventory(&self) -> Result<reqwest::Response, reqwest::Error> {
+        debug!("Client: Sending inventory...");
         let request_client = reqwest::Client::new();
         request_client
-            .patch("https://localhost/api/devices/v1/inventory/devices/attributes")
+            .patch("https://localhost/api/devices/v1/inventory/device/attributes")
             .bearer_auth(self.jwt_token.as_ref().unwrap())
-            .json(&[InventoryAttribute {
-                name: "Mac".to_string(),
-                value: "123:456:789:123".to_string(),
-            }])
+            .json(&[
+                InventoryAttribute {
+                    name: "Mac".to_string(),
+                    value: "123:456:789:123".to_string(),
+                },
+                InventoryAttribute {
+                    name: "device_type".to_string(),
+                    value: "qemux86-64".to_string(),
+                },
+                InventoryAttribute {
+                    name: "artifact_name".to_string(),
+                    value: "foobar".to_string(),
+                },
+            ])
             .send()
     }
 
@@ -163,6 +200,7 @@ impl Client {
     // Schemes : HTTPS
     // GET /device/deployments/next
     pub fn check_for_update(&self) -> Result<reqwest::Response, reqwest::Error> {
+        debug!("Client: Checking for update...");
         let request_client = reqwest::Client::new();
         request_client
             .get("https://localhost/api/devices/v1/deployments/device/deployments/next")
