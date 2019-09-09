@@ -218,10 +218,26 @@ impl Client {
             .get(&update_info.artifact.source.uri)
             .send().expect("Failed to GET the update");
         // TODO -- Later this should be streamed directly to the artifact.
-        let f = std::fs::File::open("foo.txt").expect("Failed to open the file");
-        let mut writer = BufWriter::new(f);
-        resp.copy_to(&mut writer);
-        // TODO -- merge this with the mender-artifact library!
+        {
+            let f = std::fs::File::open("foo.txt").expect("Failed to open the file");
+            let mut writer = BufWriter::new(f);
+            resp.copy_to(&mut writer);
+            // TODO -- merge this with the mender-artifact library!
+        }
+
+        let mut f = std::fs::File::open("foo.txt").expect("Failed to open the file");
+
+        let mut ma = ma::MenderArtifact::new(&mut f);
+        let mut payloads = ma.parse("todo");
+
+
+        let entry = payloads.unwrap().next().unwrap().unwrap();
+        // Check that the entry base path name is the same as the one we are expecting
+        let path = entry.header().path().expect("Failed to get the header");
+        if !path.starts_with("data") {
+            eprintln!("No data found in artifact");
+        }
+
     }
 }
 
