@@ -12,6 +12,8 @@ mod client;
 mod syncevent; // Bring the syncevent module into scope // Bring the client into scope
 mod authevent;
 use client::Client;
+mod bootflags;
+use bootflags::BootFlag;
 
 
 pub trait EventProducer {
@@ -269,6 +271,20 @@ impl Download {
     }
 }
 
+struct ArtifactInstall {}
+
+impl ArtifactInstall {
+    fn install() -> (ExternalState, Event) {
+        let bf = bootflags::BootFlag::new();
+        if bf.flag("mender_boot_part", "1").set() {
+                (ExternalState::ArtifactReboot, Event::None)
+            }
+        else {
+            (ExternalState::ArtifactFailure, Event::None)
+        }
+    }
+}
+
 struct Context {
     // sync_events: syncevent::Event,
 }
@@ -333,7 +349,12 @@ impl StateMachine {
                 }
                 (ExternalState::Download, Event::DownloadUpdate(update_info)) => {
                     debug!("Download: Downloading the new update d-_-b");
-                    (ExternalState::Idle, Event::None)
+                    client.download_update(update_info);
+                    (ExternalState::Idle, Event::None) // TODO
+                }
+                (ExternalState::ArtifactInstall, Event::None) => {
+                    debug!("Install: Installing the update");
+                    ArtifactInstall::install()
                 }
                 (_, _) => panic!("Unrecognized state transition"),
             };

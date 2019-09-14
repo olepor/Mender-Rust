@@ -1,6 +1,4 @@
 use openssl::rsa::{Padding, Rsa};
-// use reqwest::Client;
-use std::collections::HashMap;
 use std::io::BufWriter;
 
 use log::{debug, info, trace, warn};
@@ -222,7 +220,6 @@ impl Client {
             let f = std::fs::File::open("foo.txt").expect("Failed to open the file");
             let mut writer = BufWriter::new(f);
             resp.copy_to(&mut writer);
-            // TODO -- merge this with the mender-artifact library!
         }
 
         let mut f = std::fs::File::open("foo.txt").expect("Failed to open the file");
@@ -230,13 +227,22 @@ impl Client {
         let mut ma = ma::MenderArtifact::new(&mut f);
         let mut payloads = ma.parse("todo");
 
-
-        let entry = payloads.unwrap().next().unwrap().unwrap();
+        let mut entry = payloads.unwrap().next().unwrap().unwrap();
         // Check that the entry base path name is the same as the one we are expecting
         let path = entry.header().path().expect("Failed to get the header");
         if !path.starts_with("data") {
             eprintln!("No data found in artifact");
         }
+
+        // TODO -- Open the actual other partition (Should probably be a seperate module)
+        let other_partition = std::fs::File::open("/dev/null").expect("Failed to open '/dev/null'"); // TODO - Write to other partition
+        let mut buf_writer = BufWriter::new(other_partition);
+        if let Ok(r) = std::io::copy(&mut entry, &mut buf_writer) {
+            debug!("Wrote: {:?} bytes to the other partition", r);
+        } else {
+            warn!("Failed to write to the other partition");
+        }
+
 
     }
 }
