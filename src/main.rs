@@ -92,27 +92,28 @@ impl Init {
         Init {}
     }
 
-    fn run(client: &mut Client) -> ExternalState {
-        // Try to authorize, if unsuccesful, wait for the next published authorization event.
-        use reqwest::StatusCode;
-        match client.authorize() {
-            Ok(mut resp) => match resp.status() {
-                StatusCode::OK => {
-                    info!("Client successfully authorized with the Mender server");
-                    let jwt = resp.text().expect("Failed to extract the respone text");
-                    info!("JWT token: {}", jwt);
-                    client.jwt_token = Some(jwt);
-                    client.is_authorized = true;
-                    ExternalState::Idle
-                }
-                _ => {
-                    info!("Failed to authorize the client: {:?}", resp);
-                    ExternalState::Init
-                }
-            },
-            Err(e) => {
-                debug!("Authorization request error: {:?}", e);
-                ExternalState::Init
+    // Check if we are in a committed, or un-committed partition
+    fn is_committed() {
+        let mut flgs = Vec::new();
+        flgs.push("bootcount".to_string());
+        flgs.push("upgrade_available".to_string());
+        let flags = bootflags::BootFlag::new()
+            .get(flgs);
+        // Check if we are on the committed, or the uncommitted partition
+        let bootcount = flags.get("bootcount").unwrap();
+        let upgrade_available = flags.get("upgrade_available").unwrap();
+        match (bootcount.as_ref(), upgrade_available.as_ref()) {
+            ("1", "1") => {
+                debug!("Entry into an uncommitted partition detected!");
+            }
+            ("1", "0") => {
+                debug!("Entry into a committed partition detected!");
+            }
+            ("0", "0") => {
+                debug!("Entry into a committed partition detected!");
+            }
+            (_, _) => {
+                debug!("Unknown pattern detected. Did something go wrong?");
             }
         }
     }
@@ -276,12 +277,31 @@ struct ArtifactInstall {}
 impl ArtifactInstall {
     fn install() -> (ExternalState, Event) {
         let bf = bootflags::BootFlag::new();
-        if bf.flag("mender_boot_part", "1").set() {
+        // mender_boot_part $passive_num
+        //     upgrade_available 1
+        //     bootcount 0
+        if bf.flag("mender_boot_part", "1") // TODO -- dynamically set
+            .flag("upgrade_available", "1")
+            .flag("bootcount", "0")
+            .set() {
                 (ExternalState::ArtifactReboot, Event::None)
             }
         else {
             (ExternalState::ArtifactFailure, Event::None)
         }
+    }
+}
+
+struct ArtifactReboot {}
+
+impl ArtifactReboot {
+    fn reboot() -> (ExternalState, Event) {
+        if let Ok(_) =  Command::new("reboot").status() {
+            debug!("Rebooting...");
+        } else {
+            debug!("Failed to reboot");
+        }
+        (ExternalState::Idle, Event::None)
     }
 }
 

@@ -6,12 +6,13 @@ use std::collections::HashMap;
 
 pub struct BootFlag {
     variables: HashMap<String, String>, // Variables to set
+    flags: Vec<BootFlagType>,
 }
 
 impl BootFlag {
 
     pub fn new() -> BootFlag {
-        BootFlag{variables: HashMap::new()}
+        BootFlag{variables: HashMap::new(), flags: Vec::new()}
     }
 
     pub fn flag(mut self, key: &str, value: &str) -> Self {
@@ -22,7 +23,6 @@ impl BootFlag {
     // TODO -- return error
     pub fn set(self) -> bool {
         // Loop all variables in the hashmap, and set them accordingly
-        let s = String::new();
         let mut cmd = Command::new("fw_setenv");
         for (key, val) in self.variables {
             cmd.arg(format!("{}={}\n", key, val));
@@ -34,6 +34,20 @@ impl BootFlag {
             info!("Failed to set the firmware environment");
             false
         }
+    }
+
+    // pub fn get(self, arg: BootFlagType) -> Self {
+    //     self.flags.push(arg);
+    //     self
+    // }
+
+    pub fn get(self, args: Vec<String>) -> HashMap<String, String> {
+        let mut r: HashMap<String, String> = HashMap::new();
+        for arg in args {
+            let bf = BootFlag::fw_printenv(&arg).expect("Failed to get the boot variable");
+            r.insert(arg, bf);
+        }
+        return r;
     }
 
     pub fn fw_printenv(name: &str) -> Result<String, &'static str> {
@@ -51,4 +65,10 @@ impl BootFlag {
             .expect("Failet to set fw key, value pair");
         return output.status.success();
     }
+}
+
+pub enum BootFlagType {
+    BootCount,
+    BootPartition,
+    UpgradeAvailable,
 }
