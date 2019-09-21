@@ -85,15 +85,15 @@ enum InternalState {
     ArtifactReboot,
 }
 
-struct Init {}
+struct InitState {}
 
-impl Init {
-    fn new() -> Init {
-        Init {}
+impl InitState {
+    fn new() -> InitState {
+        InitState {}
     }
 
     // Check if we are in a committed, or un-committed partition
-    fn is_committed() {
+    fn is_committed() -> bool {
         let mut flgs = Vec::new();
         flgs.push("bootcount".to_string());
         flgs.push("upgrade_available".to_string());
@@ -105,38 +105,31 @@ impl Init {
         match (bootcount.as_ref(), upgrade_available.as_ref()) {
             ("1", "1") => {
                 debug!("Entry into an uncommitted partition detected!");
+                false
             }
             ("1", "0") => {
                 debug!("Entry into a committed partition detected!");
+                true
             }
             ("0", "0") => {
                 debug!("Entry into a committed partition detected!");
+                true
             }
             (_, _) => {
                 debug!("Unknown pattern detected. Did something go wrong?");
+                true
             }
         }
     }
 }
 
-enum InitState {
-    Authorize,
-    AuthorizeWait,
-}
-
-impl State for Init {
+impl State for InitState {
     fn name<'a>(&'a self) -> &'a str {
         "Init"
     }
 }
 
 struct Idle {}
-
-impl From<Init> for Idle {
-    fn from(state: Init) -> Self {
-        Idle {}
-    }
-}
 
 impl Idle {
     fn wait_for_event(event_producer: &dyn EventProducer) -> (ExternalState, Event) {
@@ -321,7 +314,7 @@ impl StateMachine {
         StateMachine {
             external_state: ExternalState::Init,
             internal_state: InternalState::Init,
-            state: Box::new(Init::new()),
+            state: Box::new(InitState::new()),
             context: Context {
                 // sync_events: syncevent::Event::new(), // Do not start until the client is authorized!
             },
@@ -340,7 +333,11 @@ impl StateMachine {
             let (state, action) = match (cur_state, cur_action) {
                 (ExternalState::Init, Event::Uninitialized) => {
                     debug!("Starting the authorization event producer");
-                    (ExternalState::Idle, Event::None)
+                    // (ExternalState::Idle, Event::None)
+                    match InitState::is_committed() {
+                        true => (ExternalState::Idle, Event::None),
+                        false => (ExternalState::Idle, Event::None),
+                    }
                 }
                 (ExternalState::Idle, _) if !client.is_authorized => {
                     debug!("Client is not authorized, waiting for authorization event");
