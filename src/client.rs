@@ -224,7 +224,7 @@ impl Client {
 
         let mut f = std::fs::File::open("foo.txt").expect("Failed to open the file");
 
-        let mut ma = ma::MenderArtifact::new(&mut f);
+        let mut ma = mender_artifact::MenderArtifact::new(&mut f);
         let mut payloads = ma.parse("todo");
 
         let mut entry = payloads.unwrap().next().unwrap().unwrap();

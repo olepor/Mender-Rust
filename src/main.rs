@@ -3,7 +3,7 @@ use std::process::Command;
 use std::time;
 use reqwest::StatusCode;
 
-use ma::*;
+use mender_artifact::*;
 
 // use rsa::{PublicKey, RSAPrivateKey, PaddingScheme};
 // use rand::rngs::OsRng;
