@@ -113,7 +113,7 @@ impl Client {
         // Authorization API can be found at:
         // https://docs.mender.io/2.0/apis/device-apis/device-authentication
         let protocol = "https://";
-        let host = "localhost"; // TODO -- For testing purposes
+        let host = "docker.mender.io"; // TODO -- For testing purposes
         let basepath = "/api/devices/v1";
         let request = "/authentication/auth_requests";
         let uri = protocol.to_owned() + host + basepath + request;
@@ -176,7 +176,7 @@ impl Client {
         debug!("Client: Sending inventory...");
         let request_client = reqwest::Client::new();
         request_client
-            .patch("https://localhost/api/devices/v1/inventory/device/attributes")
+            .patch("https://docker.mender.io/api/devices/v1/inventory/device/attributes")
             .bearer_auth(self.jwt_token.as_ref().unwrap())
             .json(&[
                 InventoryAttribute {
@@ -203,7 +203,7 @@ impl Client {
         debug!("Client: Checking for update...");
         let request_client = reqwest::Client::new();
         request_client
-            .get("https://localhost/api/devices/v1/deployments/device/deployments/next")
+            .get("https://docker.mender.io/api/devices/v1/deployments/device/deployments/next")
             .bearer_auth(self.jwt_token.as_ref().unwrap())
             .query(&[("device_type", "qemux86-64"), ("artifact_name", "foobar")])
             .send()
