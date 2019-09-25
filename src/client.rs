@@ -1,5 +1,7 @@
 use openssl::rsa::{Padding, Rsa};
 use std::io::BufWriter;
+use std::fs::File;
+use std::io::Read;
 
 use log::{debug, info, trace, warn};
 
@@ -60,6 +62,23 @@ pub struct UpdateInfo {
     artifact: Artifact,
 }
 
+#[derive(Debug)]
+pub struct ClientError {
+    error: Box<std::error::Error>,
+}
+
+impl From<std::io::Error> for ClientError {
+    fn from(error: std::io::Error) -> Self {
+        ClientError{error: Box::new(error)}
+    }
+}
+
+impl From<reqwest::Error> for ClientError {
+    fn from(error: reqwest::Error) -> Self {
+        ClientError{error: Box::new(error)}
+    }
+}
+
 pub struct Client {
     pub is_authorized: bool,
     address: String,
@@ -107,7 +126,7 @@ impl Client {
         Rsa::generate(3072).unwrap()
     }
 
-    pub fn authorize(&self) -> Result<reqwest::Response, reqwest::Error> {
+    pub fn authorize(&self) -> Result<reqwest::Response, ClientError> {
         debug!("The client is trying to authorize...");
         // Do authorization
         // Authorization API can be found at:
@@ -133,14 +152,25 @@ impl Client {
         let sig = self.sign_request(auth_req_str.as_bytes());
         // Base64 encode the signature
         let sig_base64 = base64::encode(&sig[..384]);
-        let request_client = reqwest::Client::new();
-        request_client
+
+
+        // read the server certificate
+        let mut buf = Vec::new();
+        File::open("/etc/mender/server.crt")?.read_to_end(&mut buf)?;
+
+        // create a certificate
+        let cert = reqwest::Certificate::from_pem(&buf)?;
+
+        let request_client = reqwest::Client::builder()
+            .add_root_certificate(cert)
+            .build()?;
+        Ok(request_client
             .post(&uri)
             .header("Content-Type", "application/json")
             .header("X-MEN-Signature", sig_base64)
             .body(auth_req_str)
             // .body(auth_req_str.as_bytes())
-            .send()
+            .send()?)
     }
 
     fn sign_request(&self, request: &[u8]) -> [u8; 3072] {
