@@ -86,6 +86,7 @@ pub struct Client {
     // public_key: Rsa<openssl::pkey::Public>,
     tenant_token: Option<String>,
     pub jwt_token: Option<String>,
+    request_client: reqwest::Client,
     // Request signature, computed as
     // 'BASE64(SIGN(device_private_key, SHA256(request_body)))'.
     // Verified with the public key presented by the device.
@@ -96,6 +97,16 @@ impl Client {
     pub fn new() -> Client {
         use std::fs::File;
         use std::io::Read;
+        // read the server certificate
+        let mut buf = Vec::new();
+        File::open("/etc/mender/server.crt").unwrap().read_to_end(&mut buf).unwrap();
+
+        // create a certificate
+        let cert = reqwest::Certificate::from_pem(&buf).unwrap();
+
+        let request_client = reqwest::Client::builder()
+            .add_root_certificate(cert)
+            .build().unwrap();
         if let Ok(mut file) = File::open("./dummies/private-key-rsa.key") {
             debug!("Reading in the private key...");
             let mut buffer = Vec::new();
@@ -109,6 +120,7 @@ impl Client {
                 private_key: rsa,
                 tenant_token: None,
                 jwt_token: None,
+                request_client: request_client,
             }
         } else {
             debug!("Generating rsa private key of length 3072 bits");
@@ -119,6 +131,7 @@ impl Client {
                 private_key: rsa,
                 tenant_token: None,
                 jwt_token: None,
+                request_client: request_client,
             }
         }
     }
@@ -153,18 +166,7 @@ impl Client {
         // Base64 encode the signature
         let sig_base64 = base64::encode(&sig[..384]);
 
-
-        // read the server certificate
-        let mut buf = Vec::new();
-        File::open("/etc/mender/server.crt")?.read_to_end(&mut buf)?;
-
-        // create a certificate
-        let cert = reqwest::Certificate::from_pem(&buf)?;
-
-        let request_client = reqwest::Client::builder()
-            .add_root_certificate(cert)
-            .build()?;
-        Ok(request_client
+        Ok(self.request_client
             .post(&uri)
             .header("Content-Type", "application/json")
             .header("X-MEN-Signature", sig_base64)
@@ -205,7 +207,7 @@ impl Client {
     pub fn send_inventory(&self) -> Result<reqwest::Response, reqwest::Error> {
         debug!("Client: Sending inventory...");
         let request_client = reqwest::Client::new();
-        request_client
+        self.request_client
             .patch("https://docker.mender.io/api/devices/v1/inventory/device/attributes")
             .bearer_auth(self.jwt_token.as_ref().unwrap())
             .json(&[
@@ -231,8 +233,7 @@ impl Client {
     // GET /device/deployments/next
     pub fn check_for_update(&self) -> Result<reqwest::Response, reqwest::Error> {
         debug!("Client: Checking for update...");
-        let request_client = reqwest::Client::new();
-        request_client
+        self.request_client
             .get("https://docker.mender.io/api/devices/v1/deployments/device/deployments/next")
             .bearer_auth(self.jwt_token.as_ref().unwrap())
             .query(&[("device_type", "qemux86-64"), ("artifact_name", "foobar")])
@@ -241,8 +242,7 @@ impl Client {
 
     pub fn download_update(&self, update_info: UpdateInfo) {
         debug!("Client: Downloading the update...");
-        let request_client = reqwest::Client::new();
-        let mut resp = request_client
+        let mut resp = self.request_client
             .get(&update_info.artifact.source.uri)
             .send().expect("Failed to GET the update");
         // TODO -- Later this should be streamed directly to the artifact.
