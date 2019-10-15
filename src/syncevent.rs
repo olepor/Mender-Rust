@@ -48,7 +48,7 @@ impl SyncEvent {
     // Initialize the Evnt struct with an InventoryCheck at once,
     // and then an update check after a minute.
     pub fn new() -> SyncEvent {
-        let file = File::open("./dummies/mender.conf").expect("Error opening file");
+        let file = File::open("/etc/mender/mender.conf").expect("Error opening file");
         let reader = BufReader::new(file);
         let conf: IntervalConf =
             serde_json::from_reader(reader).expect("Failed to parse the config file");
