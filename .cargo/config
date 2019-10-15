@@ -5,7 +5,6 @@ linker="/opt/poky/2.7.1/sysroots/x86_64-pokysdk-linux/usr/bin/x86_64-poky-linux/
 rustflags = [
 # In the Yocto x86-64 sdk 
 # CC = -m64 -march=core2 -mtune=core2 -msse3 -mfpmath=sse --sysroot=/opt/poky/2.7.1/sysroots/core2-64-poky-linux
-"-C", "link-arg=-m64",
 "-C", "link-arg=-mtune=core2",
 "-C", "link-arg=-msse3",
 "-C", "link-arg=-mfpmath=sse",
