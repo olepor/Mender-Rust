@@ -250,15 +250,14 @@ impl Client {
             .get(&update_info.artifact.source.uri)
             .send().expect("Failed to GET the update");
         // TODO -- Later this should be streamed directly to the artifact.
-        {
-            let f = std::fs::File::open("foo.txt").expect("Failed to open the file");
-            let mut writer = BufWriter::new(f);
-            resp.copy_to(&mut writer);
-        }
+        // let mut f = std::fs::File::create("artifact.mender").expect("Failed to create file");
+        let mut buf: Vec<u8> = Vec::new();
+        // let mut buf = BufWriter::new(buf);
+        // resp.copy_to(&mut buf).expect("Failed to write the Artifact to file");
+        // debug!("# Bytes in buffer: {}", buf_writer.buffer().len());
 
-        let mut f = std::fs::File::open("foo.txt").expect("Failed to open the file");
-
-        let mut ma = mender_artifact::MenderArtifact::new(&mut f);
+        debug!("Ready to parse the Artifact");
+        let mut ma = mender_artifact::MenderArtifact::new(&mut resp);
         let mut payloads = ma.parse("todo");
 
         let mut entry = payloads.unwrap().next().unwrap().unwrap();
