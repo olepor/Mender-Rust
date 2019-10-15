@@ -242,7 +242,11 @@ impl Client {
 
     pub fn download_update(&self, update_info: UpdateInfo) {
         debug!("Client: Downloading the update...");
-        let mut resp = self.request_client
+        let request_client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap();
+        let mut resp = request_client
             .get(&update_info.artifact.source.uri)
             .send().expect("Failed to GET the update");
         // TODO -- Later this should be streamed directly to the artifact.
