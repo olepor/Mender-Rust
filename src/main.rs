@@ -273,7 +273,7 @@ impl ArtifactInstall {
         // mender_boot_part $passive_num
         //     upgrade_available 1
         //     bootcount 0
-        if bf.flag("mender_boot_part", "1") // TODO -- dynamically set
+        if bf.flag("mender_boot_part", "3") // TODO -- dynamically set
             .flag("upgrade_available", "1")
             .flag("bootcount", "0")
             .set() {
@@ -367,11 +367,16 @@ impl StateMachine {
                 (ExternalState::Download, Event::DownloadUpdate(update_info)) => {
                     debug!("Download: Downloading the new update d-_-b");
                     client.download_update(update_info);
-                    (ExternalState::Idle, Event::None) // TODO
+                    (ExternalState::ArtifactInstall, Event::None) // TODO
                 }
                 (ExternalState::ArtifactInstall, Event::None) => {
                     debug!("Install: Installing the update");
                     ArtifactInstall::install()
+                }
+                (ExternalState::ArtifactReboot, Event::None) => {
+                    debug!("Reboot! rebooting...");
+                    ArtifactReboot::reboot();
+                    (ExternalState::ArtifactFailure, Event::None)
                 }
                 (_, _) => panic!("Unrecognized state transition"),
             };
