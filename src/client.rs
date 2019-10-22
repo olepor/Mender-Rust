@@ -258,24 +258,7 @@ impl Client {
 
         debug!("Ready to parse the Artifact");
         let mut ma = mender_artifact::MenderArtifact::new(&mut resp);
-        let mut payloads = ma.parse("todo");
-
-        let mut entry = payloads.unwrap().next().unwrap().unwrap();
-        // Check that the entry base path name is the same as the one we are expecting
-        let path = entry.header().path().expect("Failed to get the header");
-        if !path.starts_with("data") {
-            eprintln!("No data found in artifact");
-        }
-
-        // TODO -- Open the actual other partition (Should probably be a seperate module)
-        let other_partition = std::fs::File::open("/dev/null").expect("Failed to open '/dev/null'"); // TODO - Write to other partition
-        let mut buf_writer = BufWriter::new(other_partition);
-        if let Ok(r) = std::io::copy(&mut entry, &mut buf_writer) {
-            debug!("Wrote: {:?} bytes to the other partition", r);
-        } else {
-            warn!("Failed to write to the other partition");
-        }
-
+        let mut payloads = ma.parse("/dev/hda3"); // TODO -- make dynamic
 
     }
 }
